@@ -1,0 +1,80 @@
+(test
+ (name contract_test)
+ (modules contract_test)
+ (libraries clamp alcotest yojson unix))
+
+(test
+ (name phase1_test)
+ (modules phase1_test)
+ (deps
+  ../../clamp.yaml
+  (source_tree ../fixtures))
+ (libraries clamp alcotest str))
+
+(test
+ (name phase2_test)
+ (modules phase2_test)
+ (deps ../../clamp.yaml ../../bin/kb.exe)
+ (libraries clamp alcotest str timedesc))
+
+(test
+ (name phase3_test)
+ (modules phase3_test)
+ (libraries clamp alcotest))
+
+(test
+ (name phase4_test)
+ (modules phase4_test)
+ (deps
+  (source_tree ../fixtures/phase4))
+ (libraries clamp alcotest unix yojson))
+
+(test
+ (name phase6_test)
+ (modules phase6_test)
+ (libraries clamp alcotest))
+
+(test
+ (name phase8_skill_test)
+ (modules phase8_skill_test)
+ (deps
+  ../../.agents/skills/managing-clamp-knowledge/SKILL.md
+  ../../PLAN.md
+  ../../PRD.md
+  (source_tree ../fixtures/phase8))
+ (libraries clamp alcotest str yojson))
+
+(test
+ (name phase9_acceptance_test)
+ (modules phase9_acceptance_test)
+ (deps
+  ../../.agents/phase9-acceptance
+  ../../.gitignore
+  ../../.ocaml-version
+  ../../AGENTS.md
+  ../../PLAN.md
+  ../../PRD.md
+  ../../README.md
+  ../../TODO.md
+  ../../bin/kb.exe
+  ../../clamp.opam
+  ../../clamp.opam.locked
+  ../../clamp.yaml
+  ../../dune
+  ../../dune-project
+  ../integration/phase3_database_test.exe
+  ../integration/phase5_sync_test.exe
+  ../integration/phase7_publication_test.exe
+  ../integration/phase8_workflow_test.exe
+  contract_test.exe
+  phase2_test.exe
+  phase4_test.exe
+  phase6_test.exe
+  phase8_skill_test.exe
+  (source_tree ../../.agents)
+  (source_tree ../../bin)
+  (source_tree ../../db)
+  (source_tree ../../knowledge)
+  (source_tree ../../lib)
+  (source_tree ..))
+ (libraries alcotest str unix yojson))

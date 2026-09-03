@@ -1,0 +1,7 @@
+(library
+ (name clamp)
+ (public_name clamp)
+ (libraries cmarkit curl digestif num yojson yaml unix str timedesc postgresql)
+ (foreign_stubs
+  (language c)
+  (names secure_fs_stubs)))

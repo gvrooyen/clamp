@@ -1,0 +1,4 @@
+(executable
+ (name kb)
+ (public_name kb)
+ (libraries clamp cmdliner))

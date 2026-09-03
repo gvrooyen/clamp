@@ -1,0 +1,31 @@
+opam-version: "2.0"
+synopsis: "Agent-managed knowledge base for Amp Orbs"
+description: """
+Clamp stores durable knowledge as Git-versioned OKF Markdown and provides a
+native kb CLI with local bundle validation, mutation, task, and TODO behavior.
+Clamp v1 and Phases 0–9 are implemented. Repository-owned acceptance remains
+local-only; production actions require explicit operator approval.
+"""
+maintainer: "G-J van Rooyen <gvrooyen@gmail.com>"
+authors: "Gert-Jan van Rooyen"
+license: "MIT"
+homepage: "https://github.com/gvrooyen/clamp"
+bug-reports: "https://github.com/gvrooyen/clamp/issues"
+dev-repo: "git+https://github.com/gvrooyen/clamp.git"
+build: [
+  ["dune" "build" "-p" name "-j" jobs]
+]
+depends: [
+  "ocaml" {= "5.5.0"}
+  "dune" {>= "3.24.2" & < "3.25"}
+  "cmdliner" {>= "2.0.0" & < "3.0"}
+  "cmarkit" {>= "0.4.0" & < "0.5"}
+  "postgresql" {>= "5.4.0" & < "6.0"}
+  "curl" {>= "0.10.0" & < "0.11"}
+  "yojson" {>= "3.0.0" & < "4.0"}
+  "yaml" {>= "3.2.0" & < "4.0"}
+  "digestif" {>= "1.3.0" & < "2.0"}
+  "num" {>= "1.6" & < "2.0"}
+  "timedesc" {>= "3.1.0" & < "4.0"}
+  "alcotest" {with-test}
+]

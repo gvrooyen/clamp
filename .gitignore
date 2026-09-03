@@ -1,0 +1,11 @@
+_build/
+_opam/
+*.install
+compile_commands.json
+coverage/
+*.log
+/.clamp/transactions/
+
+.env
+.env.*
+!.env.example

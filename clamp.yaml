@@ -1,0 +1,21 @@
+schema_version: 1
+source_repository: github.com/gvrooyen/clamp
+timezone: Africa/Johannesburg
+inferred_writes: confirm
+embedding:
+  provider: openrouter
+  base_url: https://openrouter.ai/api/v1
+  model: openai/text-embedding-3-small
+  dimensions: 1536
+  max_input_bytes: 8000
+  provider_order: [openai]
+  allow_fallbacks: false
+  data_collection: deny
+retrieval:
+  candidate_limit: 100
+  result_limit: 10
+  semantic_weight: 0.70
+  recency_weight: 0.20
+  frequency_weight: 0.10
+  recency_half_life_days: 30
+  frequency_saturation_count: 100

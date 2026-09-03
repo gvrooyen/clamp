@@ -1,0 +1,202 @@
+{
+  "schema_version": 2,
+  "skill": "managing-clamp-knowledge",
+  "cases": [
+    {
+      "id": "fresh-sync",
+      "command": "kb sync --json",
+      "response": {"ok": true, "code": "sync_complete", "data": {"commit": "1111111111111111111111111111111111111111", "rebuilt": false, "diagnostics": [], "counts": {"added": 0, "metadata_updated": 0, "reembedded": 0, "unchanged": 4, "deleted": 0}}},
+      "expected_action": "indexed_retrieval_ready"
+    },
+    {
+      "id": "search",
+      "command": "kb search \"database migration policy\" --json",
+      "response": {"ok": true, "code": "search_complete", "data": {"results": [{"id": "facts/neon-migration-policy", "type": "fact", "title": "Neon migration policy", "description": null, "status": "stable", "verified_tier": "human-reviewed", "asserted_by": "human:owner", "task_state": null, "semantic": 1.0, "recency": 1.0, "frequency": 0.0, "score": 0.9, "snippet": "Use the direct connection."}]}},
+      "expected_action": "inspect_ranked_candidates"
+    },
+    {
+      "id": "get",
+      "command": "kb get facts/neon-migration-policy --json",
+      "response": {"ok": true, "code": "concept_retrieved", "data": {"id": "facts/neon-migration-policy", "type": "fact", "title": "Neon migration policy", "description": null, "status": "stable", "verified_tier": "human-reviewed", "asserted_by": "human:owner", "task_state": null, "frontmatter": {"type": "fact"}, "body": "Use the direct connection."}},
+      "expected_action": "report_full_content_access"
+    },
+    {
+      "id": "explicit-fact",
+      "command": "kb add facts/neon-migrations-use-direct-connection --input /tmp/clamp-fact.md --claim explicit --json",
+      "response": {"ok": true, "code": "concept_added", "data": {"id": "facts/neon-migrations-use-direct-connection"}},
+      "expected_action": "mutation_recorded"
+    },
+    {
+      "id": "inference-blocked",
+      "command": "kb add facts/inferred-publication-property --input /tmp/clamp-inference.md --claim inferred --json",
+      "response": {"ok": false, "code": "confirmation_required", "message": "Inferred writes require confirmation.", "details": {}},
+      "expected_action": "ask_for_confirmation_without_write"
+    },
+    {
+      "id": "inference-confirmed",
+      "command": "kb add facts/inferred-publication-property --input /tmp/clamp-inference.md --claim inferred --confirmed --json",
+      "response": {"ok": true, "code": "concept_added", "data": {"id": "facts/inferred-publication-property"}},
+      "expected_action": "mutation_recorded"
+    },
+    {
+      "id": "auto-draft-policy",
+      "command": "kb config set inferred-writes auto_draft --direct-user-intent --json",
+      "response": {"ok": true, "code": "config_updated", "data": {"inferred_writes": "auto_draft"}},
+      "expected_action": "policy_updated_by_direct_user_intent"
+    },
+    {
+      "id": "auto-draft-write",
+      "command": "kb add facts/automatic-draft --input /tmp/clamp-auto-draft.md --claim inferred --json",
+      "response": {"ok": true, "code": "concept_added", "data": {"id": "facts/automatic-draft"}},
+      "expected_action": "unverified_draft_recorded"
+    },
+    {
+      "id": "journal",
+      "command": "kb add --input /tmp/clamp-journal.md --claim explicit --json",
+      "response": {"ok": true, "code": "concept_added", "data": {"id": "journal/2026/2026-08-27"}},
+      "expected_action": "mutation_recorded"
+    },
+    {
+      "id": "verification-authority-required",
+      "command": "kb verify facts/neon-migrations-use-direct-connection --json",
+      "response": {"ok": false, "code": "verification_authority_required", "message": "--verification-authority user-explicit is required.", "details": {}},
+      "expected_action": "do_not_record_human_verification"
+    },
+    {
+      "id": "verification-agent-rejected",
+      "command": "kb verify facts/neon-migrations-use-direct-connection --verification-authority agent-reviewed --json",
+      "response": {"ok": false, "code": "invalid_verification_authority", "message": "--verification-authority must be user-explicit.", "details": {}},
+      "expected_action": "do_not_record_human_verification"
+    },
+    {
+      "id": "verify-user-explicit",
+      "command": "kb verify facts/neon-migrations-use-direct-connection --verification-authority user-explicit --json",
+      "response": {"ok": true, "code": "concept_verified", "data": {"id": "facts/neon-migrations-use-direct-connection"}},
+      "expected_action": "human_verification_recorded"
+    },
+    {
+      "id": "deprecate",
+      "command": "kb deprecate facts/old-policy --superseded-by facts/current-policy --claim explicit --json",
+      "response": {"ok": true, "code": "concept_deprecated", "data": {"id": "facts/old-policy"}},
+      "expected_action": "mutation_recorded"
+    },
+    {
+      "id": "task-add",
+      "command": "kb task add --input /tmp/clamp-task.md --claim explicit --json",
+      "response": {"ok": true, "code": "task_added", "data": {"id": "tasks/01K00000000000000000000000-review-clamp-retrieval-evidence"}},
+      "expected_action": "retain_returned_task_id"
+    },
+    {
+      "id": "task-start",
+      "command": "kb task start <returned-task-id> --json",
+      "response": {"ok": true, "code": "task_started", "data": {"id": "tasks/01K00000000000000000000000-review-clamp-retrieval-evidence"}},
+      "expected_action": "pass_returned_task_id_unchanged"
+    },
+    {
+      "id": "task-done",
+      "command": "kb task done <returned-task-id> --closure-authority performed-and-verified --json",
+      "response": {"ok": true, "code": "task_done", "data": {"id": "tasks/01K00000000000000000000000-review-clamp-retrieval-evidence"}},
+      "expected_action": "pass_returned_task_id_unchanged"
+    },
+    {
+      "id": "degraded-search",
+      "command": "kb search \"database migration policy\" --json",
+      "response": {"ok": false, "code": "database_unavailable", "message": "Database connection failed.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}},
+      "expected_action": "local_lexical_fallback"
+    },
+    {
+      "id": "publish-success",
+      "command": "kb publish --thread-id <current-thread-id> --json",
+      "response": {"ok": true, "code": "publish_complete", "data": {"commit": "2222222222222222222222222222222222222222", "sync": {"code": "sync_complete", "commit": "2222222222222222222222222222222222222222", "rebuilt": false, "diagnostics": [], "counts": {"added": 3, "metadata_updated": 0, "reembedded": 0, "unchanged": 1, "deleted": 0}}}},
+      "expected_action": "report_durable_publication_and_index"
+    }
+  ],
+  "sync_failure_contracts": [
+    {"kind": "validation", "code": "database_direct_url_missing", "message": "KB_DATABASE_DIRECT_URL is required.", "expected_exit": 2, "response": {"ok": false, "code": "database_direct_url_missing", "message": "KB_DATABASE_DIRECT_URL is required.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "authentication", "code": "database_authentication_failed", "message": "Database authentication failed.", "expected_exit": 4, "response": {"ok": false, "code": "database_authentication_failed", "message": "Database authentication failed.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "transient", "code": "database_connection_timeout", "message": "Database connection timed out.", "expected_exit": 5, "response": {"ok": false, "code": "database_connection_timeout", "message": "Database connection timed out.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "transient", "code": "database_query_timeout", "message": "Database query timed out.", "expected_exit": 5, "response": {"ok": false, "code": "database_query_timeout", "message": "Database query timed out.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "transient", "code": "database_connection_lost", "message": "Database connection was lost.", "expected_exit": 5, "response": {"ok": false, "code": "database_connection_lost", "message": "Database connection was lost.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "transient", "code": "database_unavailable", "message": "Database connection failed.", "expected_exit": 5, "response": {"ok": false, "code": "database_unavailable", "message": "Database connection failed.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "authentication", "code": "openrouter_api_key_missing", "message": "OPENROUTER_API_KEY is required when synchronization needs embeddings.", "expected_exit": 4, "response": {"ok": false, "code": "openrouter_api_key_missing", "message": "OPENROUTER_API_KEY is required when synchronization needs embeddings.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "authentication", "code": "openrouter_authentication_failed", "message": "OpenRouter authentication failed.", "expected_exit": 4, "response": {"ok": false, "code": "openrouter_authentication_failed", "message": "OpenRouter authentication failed.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "transient", "code": "openrouter_network_error", "message": "OpenRouter network request failed.", "expected_exit": 5, "response": {"ok": false, "code": "openrouter_network_error", "message": "OpenRouter network request failed.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "transient", "code": "openrouter_timeout", "message": "OpenRouter request timed out.", "expected_exit": 5, "response": {"ok": false, "code": "openrouter_timeout", "message": "OpenRouter request timed out.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "transient", "code": "openrouter_rate_limited", "message": "OpenRouter rate limited the request.", "expected_exit": 5, "response": {"ok": false, "code": "openrouter_rate_limited", "message": "OpenRouter rate limited the request.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "transient", "code": "openrouter_payment_required", "message": "OpenRouter credits are unavailable.", "expected_exit": 5, "response": {"ok": false, "code": "openrouter_payment_required", "message": "OpenRouter credits are unavailable.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "transient", "code": "openrouter_unavailable", "message": "OpenRouter returned a transient service failure.", "expected_exit": 5, "response": {"ok": false, "code": "openrouter_unavailable", "message": "OpenRouter returned a transient service failure.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "authentication", "code": "git_auth_unavailable", "message": "Authenticated Git access is unavailable.", "expected_exit": 4, "response": {"ok": false, "code": "git_auth_unavailable", "message": "Authenticated Git access is unavailable.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "authentication", "code": "git_auth_config_unsafe", "message": "Authenticated Git configuration is unsafe.", "expected_exit": 4, "response": {"ok": false, "code": "git_auth_config_unsafe", "message": "Authenticated Git configuration is unsafe.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "authentication", "code": "git_auth_failed", "message": "Authenticated Git operation failed.", "expected_exit": 4, "response": {"ok": false, "code": "git_auth_failed", "message": "Authenticated Git operation failed.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "transient", "code": "git_timeout", "message": "Git operation timed out.", "expected_exit": 5, "response": {"ok": false, "code": "git_timeout", "message": "Git operation timed out.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "transient", "code": "git_unavailable", "message": "Git operation is unavailable.", "expected_exit": 5, "response": {"ok": false, "code": "git_unavailable", "message": "Git operation is unavailable.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "transient", "code": "git_failed", "message": "Git operation failed.", "expected_exit": 5, "response": {"ok": false, "code": "git_failed", "message": "Git operation failed.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "transient", "code": "git_target_invalid", "message": "origin/main did not resolve to a commit.", "expected_exit": 5, "response": {"ok": false, "code": "git_target_invalid", "message": "origin/main did not resolve to a commit.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}},
+    {"kind": "transient", "code": "sync_already_running", "message": "Another synchronization is already running.", "expected_exit": 5, "response": {"ok": false, "code": "sync_already_running", "message": "Another synchronization is already running.", "details": {"fallback": "local_markdown_or_rg", "semantic_equivalent": false}}}
+  ],
+  "publication_failure_contracts": [
+    {
+      "kind": "internal", "code": "publish_complete_cleanup_failed", "message": "Git publication succeeded, but local publication-state cleanup must be retried.", "published": true, "preserved": false, "cleanup_pending": false, "commit": "2222222222222222222222222222222222222222", "branch": null, "paths": [], "cause": "publish_state_update_failed", "cleanup_cause": null, "expected_exit": 70, "expected_action": "retry_main_cleanup_without_email",
+      "response": {"ok": false, "code": "publish_complete_cleanup_failed", "message": "Git publication succeeded, but local publication-state cleanup must be retried.", "details": {"published": true, "commit": "2222222222222222222222222222222222222222", "cause": "publish_state_update_failed"}}
+    },
+    {
+      "kind": "stale", "code": "publish_complete_index_stale", "message": "Git publication succeeded, but the derived index is stale and must be synchronized later.", "published": true, "preserved": false, "cleanup_pending": false, "commit": "2222222222222222222222222222222222222222", "branch": null, "paths": [], "cause": "database_unavailable", "cleanup_cause": null, "expected_exit": 6, "expected_action": "report_published_and_resync_without_email",
+      "response": {"ok": false, "code": "publish_complete_index_stale", "message": "Git publication succeeded, but the derived index is stale and must be synchronized later.", "details": {"published": true, "commit": "2222222222222222222222222222222222222222", "cause": "database_unavailable"}}
+    },
+    {
+      "kind": "stale", "code": "publish_complete_index_stale_cleanup_pending", "message": "Git publication succeeded, but the derived index is stale and local publication-state cleanup is incomplete; synchronize the index later and retry or repair local cleanup before another publication.", "published": true, "preserved": false, "cleanup_pending": false, "commit": "2222222222222222222222222222222222222222", "branch": null, "paths": [], "cause": "database_unavailable", "cleanup_cause": "publish_state_update_failed", "expected_exit": 6, "expected_action": "report_index_and_cleanup_obligations_without_email",
+      "response": {"ok": false, "code": "publish_complete_index_stale_cleanup_pending", "message": "Git publication succeeded, but the derived index is stale and local publication-state cleanup is incomplete; synchronize the index later and retry or repair local cleanup before another publication.", "details": {"published": true, "commit": "2222222222222222222222222222222222222222", "cause": "database_unavailable", "cleanup_cause": "publish_state_update_failed"}}
+    },
+    {
+      "kind": "transient", "code": "publish_race_exhausted", "message": "Three clean publication races were exhausted; the latest rebased commit was preserved on a recovery branch.", "published": false, "preserved": false, "cleanup_pending": false, "commit": "4444444444444444444444444444444444444444", "branch": "recovery/T-00000000-0000-0000-0000-000000000008/20260827T120000Z", "paths": [], "cause": null, "cleanup_cause": null, "expected_exit": 5, "expected_action": "report_recovery_branch_without_email",
+      "response": {"ok": false, "code": "publish_race_exhausted", "message": "Three clean publication races were exhausted; the latest rebased commit was preserved on a recovery branch.", "details": {"published": false, "commit": "4444444444444444444444444444444444444444", "branch": "recovery/T-00000000-0000-0000-0000-000000000008/20260827T120000Z"}}
+    },
+    {
+      "kind": "conflict", "code": "publish_conflict", "message": "Managed content has a semantic rebase conflict; resolve it and retry, or preserve it explicitly.", "published": false, "preserved": false, "cleanup_pending": false, "commit": "3333333333333333333333333333333333333333", "branch": null, "paths": ["knowledge/facts/conflicted-concept.md"], "cause": null, "cleanup_cause": null, "expected_exit": 3, "expected_action": "attempt_semantic_resolution_without_email",
+      "response": {"ok": false, "code": "publish_conflict", "message": "Managed content has a semantic rebase conflict; resolve it and retry, or preserve it explicitly.", "details": {"published": false, "commit": "3333333333333333333333333333333333333333", "paths": ["knowledge/facts/conflicted-concept.md"]}}
+    },
+    {
+      "kind": "validation", "code": "publish_conflict_post_abort_preservation_required", "message": "A retained post-abort conflict must be recovered with --preserve-conflict.", "published": false, "preserved": false, "cleanup_pending": false, "commit": "3333333333333333333333333333333333333333", "branch": null, "paths": ["knowledge/facts/conflicted-concept.md"], "cause": null, "cleanup_cause": null, "expected_exit": 2, "expected_action": "retry_verified_post_abort_preservation_without_email",
+      "response": {"ok": false, "code": "publish_conflict_post_abort_preservation_required", "message": "A retained post-abort conflict must be recovered with --preserve-conflict.", "details": {"published": false, "commit": "3333333333333333333333333333333333333333", "paths": ["knowledge/facts/conflicted-concept.md"]}}
+    },
+    {
+      "kind": "validation", "code": "publish_conflict_post_abort_unverified", "message": "The retained conflict state cannot be proven safe for post-abort preservation.", "published": false, "preserved": false, "cleanup_pending": false, "commit": "3333333333333333333333333333333333333333", "branch": null, "paths": ["knowledge/facts/conflicted-concept.md"], "cause": "worktree_changed", "cleanup_cause": null, "expected_exit": 2, "expected_action": "retain_owner_work_and_state_without_email",
+      "response": {"ok": false, "code": "publish_conflict_post_abort_unverified", "message": "The retained conflict state cannot be proven safe for post-abort preservation.", "details": {"published": false, "commit": "3333333333333333333333333333333333333333", "paths": ["knowledge/facts/conflicted-concept.md"], "cause": "worktree_changed"}}
+    },
+    {
+      "kind": "internal", "code": "publish_conflict_preservation_allocation_failed", "message": "The conflict branch identity could not be recorded atomically; local publication state was retained.", "published": false, "preserved": false, "cleanup_pending": false, "commit": "3333333333333333333333333333333333333333", "branch": null, "paths": ["knowledge/facts/conflicted-concept.md"], "cause": "publish_state_update_failed", "cleanup_cause": null, "expected_exit": 70, "expected_action": "retry_branch_allocation_without_email",
+      "response": {"ok": false, "code": "publish_conflict_preservation_allocation_failed", "message": "The conflict branch identity could not be recorded atomically; local publication state was retained.", "details": {"published": false, "commit": "3333333333333333333333333333333333333333", "paths": ["knowledge/facts/conflicted-concept.md"], "cause": "publish_state_update_failed"}}
+    },
+    {
+      "kind": "transient", "code": "publish_conflict_preservation_failed", "message": "The conflict commit could not be preserved on the remote; the exact pending branch must be verified before retry.", "published": false, "preserved": false, "preservation_pending": true, "cleanup_pending": false, "commit": "3333333333333333333333333333333333333333", "branch": "conflicts/T-00000000-0000-0000-0000-000000000008/20260827T120000Z", "paths": ["knowledge/facts/conflicted-concept.md"], "cause": null, "cleanup_cause": null, "expected_exit": 5, "expected_action": "retry_exact_pending_preservation_without_email",
+      "response": {"ok": false, "code": "publish_conflict_preservation_failed", "message": "The conflict commit could not be preserved on the remote; the exact pending branch must be verified before retry.", "details": {"published": false, "preservation_pending": true, "commit": "3333333333333333333333333333333333333333", "branch": "conflicts/T-00000000-0000-0000-0000-000000000008/20260827T120000Z", "paths": ["knowledge/facts/conflicted-concept.md"]}}
+    },
+    {
+      "kind": "conflict", "code": "publish_conflict_preserved_cleanup_pending", "message": "The original knowledge commit was preserved, but local publication-state cleanup remains pending.", "published": false, "preserved": true, "cleanup_pending": true, "commit": "3333333333333333333333333333333333333333", "branch": "conflicts/T-00000000-0000-0000-0000-000000000008/20260827T120000Z", "paths": ["knowledge/facts/conflicted-concept.md"], "cause": null, "cleanup_cause": "publish_state_update_failed", "expected_exit": 3, "expected_action": "email_once_and_retry_cleanup_without_repush",
+      "response": {"ok": false, "code": "publish_conflict_preserved_cleanup_pending", "message": "The original knowledge commit was preserved, but local publication-state cleanup remains pending.", "details": {"published": false, "preserved": true, "cleanup_pending": true, "commit": "3333333333333333333333333333333333333333", "branch": "conflicts/T-00000000-0000-0000-0000-000000000008/20260827T120000Z", "paths": ["knowledge/facts/conflicted-concept.md"], "cleanup_cause": "publish_state_update_failed"}}
+    },
+    {
+      "kind": "conflict", "code": "publish_conflict_preserved", "message": "The original knowledge commit was preserved for semantic conflict resolution.", "published": false, "preserved": true, "cleanup_pending": false, "commit": "3333333333333333333333333333333333333333", "branch": "conflicts/T-00000000-0000-0000-0000-000000000008/20260827T120000Z", "paths": ["knowledge/facts/conflicted-concept.md"], "cause": null, "cleanup_cause": null, "expected_exit": 3, "expected_action": "email_once_without_cleanup_obligation",
+      "response": {"ok": false, "code": "publish_conflict_preserved", "message": "The original knowledge commit was preserved for semantic conflict resolution.", "details": {"published": false, "preserved": true, "cleanup_pending": false, "commit": "3333333333333333333333333333333333333333", "branch": "conflicts/T-00000000-0000-0000-0000-000000000008/20260827T120000Z", "paths": ["knowledge/facts/conflicted-concept.md"]}}
+    }
+  ],
+  "notification_simulation": {
+    "subject": "[Clamp] Knowledge update needs conflict resolution",
+    "thread_url": "https://ampcode.com/threads/T-00000000-0000-0000-0000-000000000008",
+    "branch": "conflicts/T-00000000-0000-0000-0000-000000000008/20260827T120000Z",
+    "commit": "3333333333333333333333333333333333333333",
+    "paths": ["knowledge/facts/conflicted-concept.md"],
+    "sequence": [
+      {"code": "publish_conflict", "preserved": false, "email_requests": 0},
+      {"code": "publish_conflict_post_abort_preservation_required", "preserved": false, "email_requests": 0},
+      {"code": "publish_conflict_post_abort_unverified", "preserved": false, "email_requests": 0},
+      {"code": "publish_conflict_preservation_allocation_failed", "preserved": false, "email_requests": 0},
+      {"code": "publish_conflict_preservation_failed", "preserved": false, "email_requests": 0},
+      {"code": "publish_conflict_preserved_cleanup_pending", "preserved": true, "email_requests": 1},
+      {"code": "publish_conflict_preserved_cleanup_pending", "preserved": true, "email_requests": 0},
+      {"code": "publish_conflict_preserved", "preserved": true, "email_requests": 0},
+      {"code": "publish_race_exhausted", "preserved": false, "email_requests": 0},
+      {"code": "publish_complete_index_stale", "preserved": false, "email_requests": 0}
+    ]
+  }
+}

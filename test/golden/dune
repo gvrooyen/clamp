@@ -1,0 +1,5 @@
+(cram
+ (deps
+  %{bin:kb}
+  ../../clamp.yaml
+  (source_tree ../fixtures)))

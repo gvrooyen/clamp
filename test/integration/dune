@@ -1,0 +1,38 @@
+(test
+ (name phase3_database_test)
+ (modules phase3_database_test)
+ (deps
+  ../../db/migrations/0001_enable_vector.sql
+  ../../db/migrations/0002_application_schema.sql)
+ (libraries clamp alcotest postgresql unix))
+
+(test
+ (name phase5_sync_test)
+ (modules phase5_sync_test)
+ (deps
+  ../../bin/kb.exe
+  ../../clamp.yaml
+  ../../db/migrations/0001_enable_vector.sql
+  ../../db/migrations/0002_application_schema.sql)
+ (libraries clamp alcotest postgresql unix str))
+
+(test
+ (name phase7_publication_test)
+ (modules phase7_publication_test)
+ (deps ../../bin/kb.exe ../../clamp.yaml)
+ (libraries clamp alcotest unix str))
+
+(test
+ (name phase8_workflow_test)
+ (modules phase8_workflow_test)
+ (deps
+  ../../bin/kb.exe
+  ../../clamp.yaml
+  ../../db/migrations/0001_enable_vector.sql
+  ../../db/migrations/0002_application_schema.sql)
+ (libraries clamp alcotest postgresql unix str yojson))
+
+(executable
+ (name phase4_openrouter_gate)
+ (modules phase4_openrouter_gate)
+ (libraries clamp))

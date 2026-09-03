@@ -1,0 +1,504 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ocaml_version="$(tr -d '[:space:]' < "$repo_root/.ocaml-version")"
+opam_version=2.5.2
+dune_version=3.24.2
+opam_root="$HOME/.local/share/clamp/opam"
+postgres_major=15
+pgvector_version=0.8.1
+pgvector_sha256=a9094dfb85ccdde3cbb295f1086d4c71a20db1d26bf1d6c39f07a7d164033eb4
+local_database=clamp_test
+trusted_0001_sha256=b669a28b01e6f0a7336b2df63b3b743596a01ecbd42df4e493590fef91549ced
+expected_pg_socket_dir=/var/run/postgresql
+expected_pg_data_directory=/var/lib/postgresql/15/main
+local_pg_socket_dir=''
+local_pg_port=''
+local_pg_data_directory=''
+
+export OPAMROOT="$opam_root"
+export OPAMYES=1
+export OPAMCOLOR=never
+
+[[ -n "$ocaml_version" ]]
+
+log() {
+  printf '[clamp setup] %s\n' "$*"
+}
+
+run_stage() {
+  local label="$1" started=$SECONDS
+  shift
+
+  log "starting ${label}"
+  "$@"
+  log "finished ${label} in $((SECONDS - started))s"
+}
+
+install_system_packages() {
+  local package packages_missing=false
+  local packages=(
+    "postgresql-${postgres_major}"
+    "postgresql-client-${postgres_major}"
+    "postgresql-server-dev-${postgres_major}"
+    build-essential
+    ca-certificates
+    curl
+    git
+    libcurl4-gnutls-dev
+    libffi-dev
+    libpq-dev
+    libyaml-dev
+    m4
+    pkg-config
+    rsync
+    unzip
+  )
+
+  for package in "${packages[@]}"; do
+    if ! dpkg-query --show --showformat='${Status}' "$package" 2>/dev/null \
+      | grep -Fqx 'install ok installed'; then
+      packages_missing=true
+      break
+    fi
+  done
+
+  if [[ "$packages_missing" == true ]]; then
+    log 'installing OCaml and PostgreSQL system prerequisites'
+    sudo apt-get update -qq
+    sudo env DEBIAN_FRONTEND=noninteractive \
+      apt-get install -y --no-install-recommends "${packages[@]}"
+  fi
+}
+
+install_opam() {
+  local machine asset expected_sha256 target temp_dir
+
+  machine="$(uname -m)"
+  case "$machine" in
+    x86_64)
+      asset="opam-${opam_version}-x86_64-linux"
+      expected_sha256=edfca2630c373b44b7ee1c2f81cd8dcf67468d0db57d6c02158de553ac63dbd4
+      ;;
+    aarch64 | arm64)
+      asset="opam-${opam_version}-arm64-linux"
+      expected_sha256=c4106ece84bcb60c68342573d2d6b4f0d6770ee088015c2216adc83d8854dcf9
+      ;;
+    *)
+      printf 'Unsupported architecture for opam: %s\n' "$machine" >&2
+      return 1
+      ;;
+  esac
+
+  mkdir -p "$HOME/.local/bin"
+  target="$HOME/.local/bin/opam"
+  if [[ ! -x "$target" ]] \
+    || [[ "$($target --version 2>/dev/null || true)" != "$opam_version" ]]; then
+    log "installing opam ${opam_version}"
+    temp_dir="$(mktemp -d)"
+    trap 'rm -rf -- "${temp_dir:-}"' RETURN
+
+    curl --fail --silent --show-error --location --retry 3 \
+      "https://github.com/ocaml/opam/releases/download/${opam_version}/${asset}" \
+      --output "$temp_dir/opam"
+    printf '%s  %s\n' "$expected_sha256" "$temp_dir/opam" \
+      | sha256sum --check --status
+    install -m 0755 "$temp_dir/opam" "$target"
+
+    trap - RETURN
+    rm -rf -- "$temp_dir"
+  fi
+
+  export PATH="$HOME/.local/bin:$PATH"
+  touch "$HOME/.bash_profile"
+  if ! grep -Fqx '# Clamp repository toolchain' "$HOME/.bash_profile"; then
+    cat >> "$HOME/.bash_profile" <<'EOF'
+
+# Clamp repository toolchain
+export PATH="$HOME/.local/bin:$PATH"
+EOF
+  fi
+  if ! grep -Fqx 'export OPAMROOT="$HOME/.local/share/clamp/opam"' "$HOME/.bash_profile"; then
+    cat >> "$HOME/.bash_profile" <<'EOF'
+export OPAMROOT="$HOME/.local/share/clamp/opam"
+EOF
+  fi
+  if ! grep -Fqx "export PATH=\"$repo_root/_opam/bin:\$PATH\"" "$HOME/.bash_profile"; then
+    printf 'export PATH="%s/_opam/bin:$PATH"\n' "$repo_root" >> "$HOME/.bash_profile"
+  fi
+
+  log "opam $(opam --version) is ready"
+}
+
+initialize_ocaml_switch() {
+  local installed_version
+
+  if [[ ! -f "$OPAMROOT/config" ]]; then
+    log 'initializing the private opam package root'
+    opam init --bare --no-setup --disable-sandboxing --yes \
+      default https://opam.ocaml.org
+  fi
+
+  if [[ ! -x "$repo_root/_opam/bin/ocamlc" ]]; then
+    if [[ -d "$repo_root/_opam/.opam-switch" ]]; then
+      log "resuming the interrupted OCaml ${ocaml_version} compiler installation"
+      (cd "$repo_root" \
+        && opam install "ocaml-base-compiler.${ocaml_version}" --yes)
+    else
+      log "creating the OCaml ${ocaml_version} switch; this can take several minutes in a fresh Orb"
+      (cd "$repo_root" \
+        && opam switch create . "ocaml-base-compiler.${ocaml_version}" \
+          --no-install --yes)
+    fi
+  fi
+
+  installed_version="$($repo_root/_opam/bin/ocamlc -version)"
+  if [[ "$installed_version" != "$ocaml_version" ]]; then
+    printf 'Expected OCaml %s in the local switch, found %s\n' \
+      "$ocaml_version" "$installed_version" >&2
+    return 1
+  fi
+}
+
+install_ocaml_dependencies() {
+  local installed_dune install_args
+
+  install_args=(install . --deps-only --with-test --yes)
+  if [[ -f "$repo_root/clamp.opam.locked" ]]; then
+    log 'installing locked OCaml dependencies'
+    install_args+=(--locked)
+  else
+    log 'installing OCaml dependencies; no lockfile is present yet'
+  fi
+
+  (cd "$repo_root" && opam "${install_args[@]}")
+  installed_dune="$(cd "$repo_root" && opam exec -- dune --version)"
+  if [[ "$installed_dune" != "$dune_version" ]]; then
+    printf 'Expected Dune %s, found %s\n' "$dune_version" "$installed_dune" >&2
+    return 1
+  fi
+
+  (cd "$repo_root" && opam exec -- dune build @install)
+  (cd "$repo_root" && opam exec -- dune install --prefix "$repo_root/_opam")
+  log "OCaml ${ocaml_version} and Dune ${installed_dune} are ready"
+}
+
+install_pgvector() {
+  local control_file installed_version temp_dir source_dir
+
+  control_file="/usr/share/postgresql/${postgres_major}/extension/vector.control"
+  installed_version=''
+  if [[ -f "$control_file" ]]; then
+    installed_version="$(sed -nE "s/^default_version[[:space:]]*=[[:space:]]*'([^']+)'.*/\\1/p" "$control_file")"
+  fi
+
+  if [[ "$installed_version" != "$pgvector_version" ]]; then
+    log "installing pgvector ${pgvector_version} for PostgreSQL ${postgres_major}"
+    temp_dir="$(mktemp -d)"
+    trap 'rm -rf -- "${temp_dir:-}"' RETURN
+
+    curl --fail --silent --show-error --location --retry 3 \
+      "https://github.com/pgvector/pgvector/archive/refs/tags/v${pgvector_version}.tar.gz" \
+      --output "$temp_dir/pgvector.tar.gz"
+    printf '%s  %s\n' "$pgvector_sha256" "$temp_dir/pgvector.tar.gz" \
+      | sha256sum --check --status
+    tar -xzf "$temp_dir/pgvector.tar.gz" -C "$temp_dir"
+    source_dir="$temp_dir/pgvector-${pgvector_version}"
+
+    make -j"$(nproc)" -C "$source_dir" \
+      PG_CONFIG="/usr/lib/postgresql/${postgres_major}/bin/pg_config"
+    sudo make -C "$source_dir" install \
+      PG_CONFIG="/usr/lib/postgresql/${postgres_major}/bin/pg_config"
+
+    trap - RETURN
+    rm -rf -- "$temp_dir"
+  fi
+}
+
+postgres_cluster_setting() {
+  local key="$1" output prefix value
+  output="$(/usr/bin/pg_conftool "$postgres_major" main show "$key")"
+  prefix="$key = "
+  [[ "$output" == "$prefix"* ]]
+  value="${output#"$prefix"}"
+  if [[ "$value" == "'"*"'" && ${#value} -ge 2 ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+
+discover_local_postgres_target() {
+  local socket_directories entry found=false
+  local_pg_port="$(postgres_cluster_setting port)"
+  socket_directories="$(postgres_cluster_setting unix_socket_directories)"
+  IFS=',' read -ra configured_socket_dirs <<< "$socket_directories"
+  for entry in "${configured_socket_dirs[@]}"; do
+    entry="${entry#"${entry%%[![:space:]]*}"}"
+    entry="${entry%"${entry##*[![:space:]]}"}"
+    [[ "$entry" == "$expected_pg_socket_dir" ]] && found=true
+  done
+  [[ "$found" == true ]]
+  local_pg_socket_dir="$expected_pg_socket_dir"
+  local_pg_data_directory="$(postgres_cluster_setting data_directory)"
+  [[ "$local_pg_port" =~ ^[0-9]+$ ]]
+  (( local_pg_port >= 1 && local_pg_port <= 65535 ))
+  [[ "$local_pg_data_directory" == "$expected_pg_data_directory" ]]
+}
+
+postgres_admin_psql() {
+  sudo -u postgres env -i HOME=/var/lib/postgresql USER=postgres LOGNAME=postgres \
+    PATH=/usr/bin:/bin PSQLRC=/dev/null /usr/bin/psql --no-psqlrc \
+    --host "$local_pg_socket_dir" --port "$local_pg_port" \
+    --username postgres "$@"
+}
+
+validate_trusted_0001() {
+  local file="$repo_root/db/migrations/0001_enable_vector.sql"
+  if ! env -i PATH=/usr/bin:/bin /usr/bin/python3 - \
+      "$file" "$trusted_0001_sha256" >/dev/null 2>&1 <<'PY'
+import hashlib
+import os
+import stat
+import sys
+
+path, expected = sys.argv[1:]
+limit = 8 * 1024 * 1024
+fd = None
+try:
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW)
+    before = os.fstat(fd)
+    if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid()
+            or before.st_mode & 0o022 or before.st_size < 0
+            or before.st_size > limit):
+        raise ValueError
+    chunks = []
+    total = 0
+    while total <= limit:
+        chunk = os.read(fd, min(65536, limit + 1 - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    after = os.fstat(fd)
+    pathname = os.lstat(path)
+    identity = lambda value: (
+        value.st_dev, value.st_ino, value.st_mode, value.st_uid, value.st_gid,
+        value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+    data = b''.join(chunks)
+    if (total > limit or total != before.st_size
+            or identity(before) != identity(after)
+            or identity(after) != identity(pathname)
+            or hashlib.sha256(data).hexdigest() != expected):
+        raise ValueError
+except BaseException:
+    sys.exit(1)
+finally:
+    if fd is not None:
+        try:
+            os.close(fd)
+        except OSError:
+            sys.exit(1)
+PY
+  then
+    printf '[clamp setup] migration_0001_untrusted: migration 0001 does not match its trusted identity\n' >&2
+    return 1
+  fi
+}
+
+ensure_local_postgres() {
+  local config_dir tuning_file tuning_temp cluster_changed=false os_user target_evidence
+
+  # Repository migration bytes are untrusted until this succeeds. Keep this
+  # ahead of cluster status, readiness, psql, or any other database connection.
+  validate_trusted_0001
+
+  if [[ ! -f "/etc/postgresql/${postgres_major}/main/postgresql.conf" ]]; then
+    log "creating local PostgreSQL ${postgres_major} cluster"
+    sudo pg_createcluster "$postgres_major" main
+  fi
+
+  discover_local_postgres_target
+
+  config_dir="/etc/postgresql/${postgres_major}/main/conf.d"
+  tuning_file="$config_dir/clamp-orb.conf"
+  tuning_temp="$(mktemp)"
+  cat > "$tuning_temp" <<'EOF'
+# Local ephemeral Clamp test database. Favor speed over durability.
+fsync = off
+synchronous_commit = off
+full_page_writes = off
+autovacuum = off
+EOF
+  sudo mkdir -p "$config_dir"
+  if ! sudo test -f "$tuning_file" || ! sudo cmp --silent "$tuning_temp" "$tuning_file"; then
+    sudo install -m 0644 "$tuning_temp" "$tuning_file"
+    cluster_changed=true
+  fi
+  rm -f -- "$tuning_temp"
+
+  if sudo pg_ctlcluster "$postgres_major" main status >/dev/null 2>&1; then
+    if [[ "$cluster_changed" == true ]]; then
+      log 'restarting local PostgreSQL after configuration change'
+      sudo pg_ctlcluster "$postgres_major" main restart
+    fi
+  else
+    log 'starting local PostgreSQL'
+    sudo pg_ctlcluster "$postgres_major" main start
+  fi
+
+  [[ -S "$local_pg_socket_dir/.s.PGSQL.$local_pg_port" ]]
+
+  os_user="$(id -un)"
+  postgres_admin_psql --dbname postgres --set=ON_ERROR_STOP=1 \
+    --set=role_name="$os_user" --set=db_name="$local_database" \
+    --set=expected_major="$postgres_major" \
+    --set=expected_port="$local_pg_port" \
+    --set=expected_data_directory="$local_pg_data_directory" <<'SQL'
+SET search_path = pg_catalog, public;
+SELECT current_setting('server_version_num')::int / 10000 = :'expected_major'::int
+   AND current_setting('port') = :'expected_port'
+   AND current_setting('data_directory') = :'expected_data_directory'
+   AND inet_server_addr() IS NULL AS clamp_identity_matches
+\gset
+\if :clamp_identity_matches
+SELECT format('CREATE ROLE %I LOGIN CREATEDB', :'role_name')
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'role_name')
+\gexec
+SELECT format('GRANT pg_read_all_settings TO %I', :'role_name')
+\gexec
+\else
+\echo 'local_cluster_mismatch'
+\quit 2
+\endif
+SELECT current_setting('server_version_num')::int / 10000 = :'expected_major'::int
+   AND current_setting('port') = :'expected_port'
+   AND current_setting('data_directory') = :'expected_data_directory'
+   AND inet_server_addr() IS NULL AS clamp_identity_matches
+\gset
+\if :clamp_identity_matches
+SELECT format('CREATE DATABASE %I OWNER %I', :'db_name', :'role_name')
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = :'db_name')
+\gexec
+\else
+\echo 'local_cluster_mismatch'
+\quit 2
+\endif
+SQL
+
+  # pgvector requires local administrator privilege. Execute a fixed bootstrap
+  # statement only after authenticating 15/main and validating migration 0001's
+  # independent trusted identity; repository SQL runs only through the ledger.
+  postgres_admin_psql --dbname "$local_database" --set=ON_ERROR_STOP=1 \
+    --set=expected_major="$postgres_major" --set=expected_port="$local_pg_port" \
+    --set=expected_data_directory="$local_pg_data_directory" >/dev/null <<'SQL'
+SET search_path = pg_catalog, public;
+SELECT current_setting('server_version_num')::int / 10000 = :'expected_major'::int
+   AND current_setting('port') = :'expected_port'
+   AND current_setting('data_directory') = :'expected_data_directory'
+   AND inet_server_addr() IS NULL AS clamp_identity_matches
+\gset
+\if :clamp_identity_matches
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
+SELECT pg_catalog.count(*) OPERATOR(pg_catalog.=) 1
+   AND pg_catalog.bool_and(
+     e.extnamespace OPERATOR(pg_catalog.=) n.oid
+     AND t.typnamespace OPERATOR(pg_catalog.=) n.oid
+     AND td.deptype OPERATOR(pg_catalog.=) 'e'
+     AND td.refobjid OPERATOR(pg_catalog.=) e.oid
+     AND oc.opcnamespace OPERATOR(pg_catalog.=) n.oid
+     AND am.amname OPERATOR(pg_catalog.=) 'hnsw'
+     AND od.deptype OPERATOR(pg_catalog.=) 'e'
+     AND od.refobjid OPERATOR(pg_catalog.=) e.oid) AS clamp_vector_identity_matches
+FROM pg_catalog.pg_extension e
+JOIN pg_catalog.pg_namespace n
+  ON n.nspname OPERATOR(pg_catalog.=) 'public'
+ AND n.oid OPERATOR(pg_catalog.=) e.extnamespace
+JOIN pg_catalog.pg_type t
+  ON t.typname OPERATOR(pg_catalog.=) 'vector'
+ AND t.typnamespace OPERATOR(pg_catalog.=) n.oid
+JOIN pg_catalog.pg_depend td
+  ON td.classid OPERATOR(pg_catalog.=) 'pg_catalog.pg_type'::pg_catalog.regclass
+ AND td.objid OPERATOR(pg_catalog.=) t.oid
+ AND td.objsubid OPERATOR(pg_catalog.=) 0
+ AND td.refclassid OPERATOR(pg_catalog.=) 'pg_catalog.pg_extension'::pg_catalog.regclass
+JOIN pg_catalog.pg_opclass oc
+  ON oc.opcname OPERATOR(pg_catalog.=) 'vector_cosine_ops'
+ AND oc.opcnamespace OPERATOR(pg_catalog.=) n.oid
+JOIN pg_catalog.pg_am am
+  ON am.oid OPERATOR(pg_catalog.=) oc.opcmethod
+ AND am.amname OPERATOR(pg_catalog.=) 'hnsw'
+JOIN pg_catalog.pg_depend od
+  ON od.classid OPERATOR(pg_catalog.=) 'pg_catalog.pg_opclass'::pg_catalog.regclass
+ AND od.objid OPERATOR(pg_catalog.=) oc.oid
+ AND od.objsubid OPERATOR(pg_catalog.=) 0
+ AND od.refclassid OPERATOR(pg_catalog.=) 'pg_catalog.pg_extension'::pg_catalog.regclass
+WHERE e.extname OPERATOR(pg_catalog.=) 'vector'
+\gset
+\if :clamp_vector_identity_matches
+\else
+\echo 'vector_extension_invalid'
+\quit 2
+\endif
+\else
+\echo 'local_cluster_mismatch'
+\quit 2
+\endif
+SQL
+
+  env -i HOME="$HOME" USER="$os_user" LOGNAME="$os_user" PATH=/usr/bin:/bin \
+    "$repo_root/_opam/bin/kb" --repo "$repo_root" database migrate \
+      --local-database "$local_database" --quiet
+
+  target_evidence="$(postgres_admin_psql --dbname "$local_database" --quiet --tuples-only --no-align \
+    --set=ON_ERROR_STOP=1 \
+    --command="SET search_path=pg_catalog,public; SELECT pg_catalog.current_setting('server_version_num')::int / 10000, pg_catalog.current_setting('data_directory'), pg_catalog.current_setting('port'), pg_catalog.inet_server_addr() IS NULL, extversion FROM pg_catalog.pg_extension WHERE extname = 'vector';")"
+  [[ "$target_evidence" == "${postgres_major}|${local_pg_data_directory}|${local_pg_port}|t|${pgvector_version}" ]]
+  log "local database ${local_database} is ready on ${local_pg_socket_dir} port ${local_pg_port} with PostgreSQL ${postgres_major} main and pgvector ${pgvector_version}"
+}
+
+check_project_secrets() {
+  local missing=0 secret
+
+  for secret in KB_DATABASE_URL KB_DATABASE_DIRECT_URL OPENROUTER_API_KEY; do
+    if [[ -n "${!secret-}" ]]; then
+      log "project secret ${secret}: present"
+    else
+      log "project secret ${secret}: missing"
+      missing=1
+    fi
+  done
+
+  if (( missing )); then
+    log 'warning: external Clamp features will be unavailable until missing project secrets are configured'
+  fi
+}
+
+verify_clean_login_shell() {
+  log 'verifying the persisted toolchain in a clean login shell'
+  env -i \
+    HOME="$HOME" \
+    USER="$(id -un)" \
+    LOGNAME="$(id -un)" \
+    OPAMROOT="$opam_root" \
+    SHELL=/bin/bash \
+    PATH=/usr/bin:/bin \
+    /bin/bash -lc "cd '$repo_root' && opam exec -- ocamlc -version && opam exec -- dune --version && kb --version && kb --json --help >/dev/null"
+}
+
+main() {
+  validate_trusted_0001
+  run_stage 'system package check/install' install_system_packages
+  run_stage 'opam bootstrap' install_opam
+  run_stage 'OCaml switch initialization' initialize_ocaml_switch
+  run_stage 'OCaml dependency and project build' install_ocaml_dependencies
+  run_stage 'pgvector check/install' install_pgvector
+  run_stage 'local PostgreSQL initialization' ensure_local_postgres
+  run_stage 'project secret check' check_project_secrets
+  run_stage 'clean login verification' verify_clean_login_shell
+  log 'setup complete; Neon and OpenRouter were not contacted or modified'
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

@@ -1,0 +1,466 @@
+#!/bin/sh
+
+# Bootstrap with a non-interactive POSIX shell so inherited Bash startup-file
+# variables cannot run code before the environment is replaced. The re-execed
+# process is Bash because the acceptance implementation below uses Bash syntax.
+if [ -z "${BASH_VERSION-}" ] || [ "${CLAMP_PHASE9_HERMETIC-}" != 1 ]; then
+  bootstrap_script_dir="$(
+    CDPATH= cd -- "$(/usr/bin/dirname -- "$0")" && /bin/pwd -P
+  )" || exit 1
+  bootstrap_script_path="$bootstrap_script_dir/phase9-acceptance"
+  bootstrap_repo_root="$(
+    CDPATH= cd -- "$bootstrap_script_dir/.." && /bin/pwd -P
+  )" || exit 1
+  bootstrap_identity="$(/usr/bin/getent passwd "$(/usr/bin/id -u)")" || exit 1
+  bootstrap_user="$(printf '%s\n' "$bootstrap_identity" | /usr/bin/cut -d: -f1)"
+  bootstrap_home="$(printf '%s\n' "$bootstrap_identity" | /usr/bin/cut -d: -f6)"
+  case "$bootstrap_home" in
+    /*) [ -n "$bootstrap_user" ] && [ -d "$bootstrap_home" ] || exit 1 ;;
+    *) exit 1 ;;
+  esac
+  bootstrap_sandbox="$(/usr/bin/mktemp -d /tmp/clamp-phase9.XXXXXXXXXX)" || exit 1
+  if ! /bin/mkdir -m 0700 "$bootstrap_sandbox/home"; then
+    /bin/rm -rf -- "$bootstrap_sandbox"
+    exit 1
+  fi
+
+  /usr/bin/env -i \
+    ALCOTEST_COLOR=never \
+    CLAMP_PHASE9_HERMETIC=1 \
+    CLAMP_PHASE9_SANDBOX="$bootstrap_sandbox" \
+    GIT_CONFIG_NOSYSTEM=1 \
+    HOME="$bootstrap_sandbox/home" \
+    LANG=C \
+    LC_ALL=C \
+    LOGNAME="$bootstrap_user" \
+    OPAMCOLOR=never \
+    OPAMROOT="$bootstrap_home/.local/share/clamp/opam" \
+    PATH="$bootstrap_repo_root/_opam/bin:/usr/bin:/bin" \
+    PSQLRC=/dev/null \
+    SHELL=/bin/bash \
+    USER="$bootstrap_user" \
+    /bin/bash "$bootstrap_script_path" "$@"
+  bootstrap_status=$?
+  if ! /bin/rm -rf -- "$bootstrap_sandbox"; then
+    bootstrap_status=1
+  fi
+  exit "$bootstrap_status"
+fi
+
+set -euo pipefail
+umask 077
+
+script_dir="$(cd -- "$(/usr/bin/dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+script_path="$script_dir/phase9-acceptance"
+repo_root="$(cd -- "$script_dir/.." && pwd)"
+
+phase9_log() {
+  printf '[clamp phase9] %s\n' "$*"
+}
+
+case "${1-}" in
+  "") self_check=false ;;
+  --self-check) self_check=true ;;
+  *)
+    phase9_log 'usage: .agents/phase9-acceptance [--self-check]'
+    exit 2
+    ;;
+esac
+
+allowed_environment_name() {
+  case "$1" in
+    ALCOTEST_COLOR | CLAMP_PHASE9_HERMETIC | CLAMP_PHASE9_SANDBOX | GIT_CONFIG_NOSYSTEM | HOME | LANG | LC_ALL | LOGNAME | OPAMCOLOR | OPAMROOT | PATH | PSQLRC | PWD | SHELL | SHLVL | USER | _)
+      return 0
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+while IFS= read -r -d '' entry; do
+  name="${entry%%=*}"
+  if ! allowed_environment_name "$name"; then
+    phase9_log "unexpected exported variable in hermetic process: ${name}"
+    exit 1
+  fi
+done < <(/usr/bin/env -0)
+
+[[ "$CLAMP_PHASE9_SANDBOX" == /tmp/clamp-phase9.* ]]
+[[ "$GIT_CONFIG_NOSYSTEM" == 1 ]]
+[[ "$HOME" == "$CLAMP_PHASE9_SANDBOX/home" && -d "$HOME" ]]
+[[ "$PATH" == "$repo_root/_opam/bin:/usr/bin:/bin" ]]
+[[ "$PSQLRC" == /dev/null ]]
+
+identity="$(/usr/bin/getent passwd "$(/usr/bin/id -u)")"
+IFS=: read -r os_user _ _ _ _ real_home _ <<< "$identity"
+[[ -n "$os_user" && "$USER" == "$os_user" && "$LOGNAME" == "$os_user" ]]
+[[ "$OPAMROOT" == "$real_home/.local/share/clamp/opam" ]]
+
+dune_binary="$repo_root/_opam/bin/dune"
+opam_binary="$real_home/.local/bin/opam"
+kb_binary="$repo_root/_build/default/bin/kb.exe"
+postgres_major=15
+expected_pg_socket_dir=/var/run/postgresql
+expected_pg_data_directory=/var/lib/postgresql/15/main
+local_pg_socket_dir=''
+local_pg_port=''
+local_pg_data_directory=''
+acceptance_database=''
+database_drop_required=false
+cleanup_database_attempted=false
+create_database_armed_at_invocation=false
+command_plan_file="$CLAMP_PHASE9_SANDBOX/command-plan.jsonl"
+: >"$command_plan_file"
+
+[[ -x "$dune_binary" && -x "$opam_binary" ]]
+
+record_command() {
+  local label="$1"
+  shift
+  /usr/bin/python3 - "$command_plan_file" "$label" "$@" <<'PY'
+import json
+import sys
+
+path, label, *command = sys.argv[1:]
+with open(path, "a", encoding="utf-8") as target:
+    target.write(json.dumps([label, *command], separators=(",", ":")) + "\n")
+PY
+}
+
+run_command() {
+  local label="$1"
+  shift
+  record_command "$label" "$@"
+  if [[ "$self_check" == true ]]; then
+    return 0
+  fi
+  "$@"
+}
+
+run_command_to_file() {
+  local label="$1" output="$2"
+  shift 2
+  record_command "$label" "$@"
+  if [[ "$self_check" == true ]]; then
+    : >"$output"
+    return 0
+  fi
+  "$@" >"$output"
+}
+
+run_repo_command() {
+  local label="$1"
+  shift
+  record_command "$label" "$@"
+  if [[ "$self_check" == true ]]; then
+    return 0
+  fi
+  (cd "$repo_root" && "$@")
+}
+
+run_repository_tests() {
+  record_command repository-tests "$dune_binary" runtest --force -j 1
+  if [[ "$self_check" == true ]]; then
+    return 0
+  fi
+  (umask 0022; cd "$repo_root" && "$dune_binary" runtest --force -j 1)
+}
+
+run_readonly_command() {
+  local label="$1"
+  shift
+  record_command "$label" "$@"
+  "$@"
+}
+
+postgres_cluster_setting() {
+  local key="$1" label output prefix value
+  case "$key" in
+    port) label=discover-port ;;
+    unix_socket_directories) label=discover-sockets ;;
+    data_directory) label=discover-data ;;
+    *) return 1 ;;
+  esac
+  output="$(run_readonly_command "$label" /usr/bin/pg_conftool \
+    "$postgres_major" main show "$key")"
+  prefix="$key = "
+  [[ "$output" == "$prefix"* ]]
+  value="${output#"$prefix"}"
+  if [[ "$value" == "'"*"'" && ${#value} -ge 2 ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+
+discover_local_postgres_target() {
+  local socket_directories entry found=false
+  local_pg_port="$(postgres_cluster_setting port)"
+  socket_directories="$(postgres_cluster_setting unix_socket_directories)"
+  IFS=',' read -ra configured_socket_dirs <<< "$socket_directories"
+  for entry in "${configured_socket_dirs[@]}"; do
+    entry="${entry#"${entry%%[![:space:]]*}"}"
+    entry="${entry%"${entry##*[![:space:]]}"}"
+    [[ "$entry" == "$expected_pg_socket_dir" ]] && found=true
+  done
+  [[ "$found" == true ]]
+  local_pg_socket_dir="$expected_pg_socket_dir"
+  local_pg_data_directory="$(postgres_cluster_setting data_directory)"
+  [[ "$local_pg_port" =~ ^[0-9]+$ ]]
+  (( local_pg_port >= 1 && local_pg_port <= 65535 ))
+  [[ "$local_pg_data_directory" == "$expected_pg_data_directory" ]]
+}
+
+postgres_admin_psql() {
+  local -a command=(
+    /usr/bin/sudo -u postgres /usr/bin/env -i
+    HOME=/var/lib/postgresql USER=postgres LOGNAME=postgres
+    PATH=/usr/bin:/bin PSQLRC=/dev/null
+    /usr/bin/psql --no-psqlrc --host "$local_pg_socket_dir"
+    --port "$local_pg_port" --username postgres "$@"
+  )
+  record_command bootstrap-pgvector "${command[@]}"
+  if [[ "$self_check" == true ]]; then
+    /bin/cat >/dev/null
+    return 0
+  fi
+  "${command[@]}"
+}
+
+drop_acceptance_database() {
+  local -a command=(
+    /usr/bin/env -i
+    HOME="$HOME" USER="$os_user" LOGNAME="$os_user"
+    PATH=/usr/bin:/bin PSQLRC=/dev/null
+    /usr/bin/dropdb --if-exists --force --no-password
+    --host "$local_pg_socket_dir" --port "$local_pg_port"
+    --username "$os_user" "$acceptance_database"
+  )
+  cleanup_database_attempted=true
+  run_command drop-database "${command[@]}" >/dev/null 2>&1
+}
+
+cleanup_database_if_required() {
+  if [[ "$database_drop_required" != true ]]; then
+    return 0
+  fi
+  if ! drop_acceptance_database; then
+    return 1
+  fi
+  database_drop_required=false
+}
+
+cleanup() {
+  local status=$?
+  trap - EXIT
+  if ! cleanup_database_if_required; then
+    phase9_log "cleanup failed for operation database ${acceptance_database}"
+    status=1
+  fi
+  if ! /bin/rm -rf -- "$CLAMP_PHASE9_SANDBOX"; then
+    phase9_log 'failed to remove the operation sandbox'
+    status=1
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+
+candidate_is_staged() {
+  local untracked="$CLAMP_PHASE9_SANDBOX/untracked"
+  if ! run_command candidate-unstaged /usr/bin/git -C "$repo_root" diff \
+      --quiet --no-ext-diff --; then
+    phase9_log 'unstaged tracked changes are not an acceptance candidate; stage or revert them'
+    return 1
+  fi
+  run_command_to_file candidate-untracked "$untracked" /usr/bin/git \
+    -C "$repo_root" ls-files --others --exclude-standard -z
+  if [[ "$self_check" != true && -s "$untracked" ]]; then
+    phase9_log 'non-ignored untracked files are not an acceptance candidate; stage or remove them'
+    return 1
+  fi
+}
+
+self_check_local_psql() {
+  local psql_probe
+  psql_probe="$(/usr/bin/env -i \
+    HOME="$HOME" USER="$os_user" LOGNAME="$os_user" \
+    PATH=/usr/bin:/bin PSQLRC=/dev/null \
+    /usr/bin/psql --no-psqlrc --quiet --tuples-only --no-align \
+      --set=ON_ERROR_STOP=1 --host "$local_pg_socket_dir" \
+      --port "$local_pg_port" --username "$os_user" --dbname clamp_test \
+      --command='SELECT 1;')"
+  [[ "$psql_probe" == 1 ]]
+}
+
+print_self_check() {
+  /usr/bin/python3 - "$command_plan_file" "$CLAMP_PHASE9_SANDBOX" \
+      "$create_database_armed_at_invocation" \
+      "$cleanup_database_attempted" <<'PY'
+import json
+import os
+import sys
+
+plan_path, sandbox, create_armed, cleanup_attempted = sys.argv[1:]
+if create_armed != "true" or cleanup_attempted != "true":
+    raise SystemExit("database create/cleanup self-check did not exercise the shared path")
+with open(plan_path, encoding="utf-8") as source:
+    plan = [json.loads(line) for line in source if line.strip()]
+print(json.dumps({
+    "mode": "self-check",
+    "environment": dict(sorted(os.environ.items())),
+    "plan": plan,
+    "local_psql_probe": "ok",
+    "create_database_armed_before_invocation": "ok",
+    "cleanup_database_probe": "attempted",
+    "sandbox": sandbox,
+}, sort_keys=True, separators=(",", ":")))
+PY
+}
+
+acceptance_log() {
+  if [[ "$self_check" != true ]]; then
+    phase9_log "$@"
+  fi
+}
+
+run_create_database() {
+  if [[ "$database_drop_required" != true ]]; then
+    phase9_log 'internal error: disposable database cleanup was not armed before creation'
+    return 1
+  fi
+  create_database_armed_at_invocation=true
+  run_command create-database "$@"
+}
+
+run_acceptance() {
+local random_suffix migration_code smoke_evidence
+
+candidate_is_staged
+acceptance_log 'running with an empty HOME and an allowlisted environment; no ambient credentials or executable paths are available'
+
+run_command resume /bin/bash "$repo_root/.agents/resume"
+discover_local_postgres_target
+
+acceptance_log 'building all source and install targets with the repository-local Dune'
+run_repo_command build "$dune_binary" build @all @install
+
+acceptance_log 'validating the repository bundle through the stable JSON contract'
+run_command_to_file validate "$CLAMP_PHASE9_SANDBOX/validation.json" \
+  "$kb_binary" --repo "$repo_root" validate --json
+if [[ "$self_check" != true ]]; then
+/usr/bin/python3 - "$CLAMP_PHASE9_SANDBOX/validation.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "rb") as source:
+    result = json.load(source)
+if result.get("ok") is not True or result.get("code") not in {
+    "bundle_valid", "bundle_valid_with_warnings"
+}:
+    raise SystemExit("repository validation did not return a successful bundle code")
+PY
+fi
+
+if [[ "$self_check" == true ]]; then
+  acceptance_database='<operation-database>'
+else
+  random_suffix="$(/usr/bin/od -An -N16 -tx1 /dev/urandom | /usr/bin/tr -d ' \n')"
+  [[ "$random_suffix" =~ ^[0-9a-f]{32}$ ]]
+  acceptance_database="clamp_phase9_${random_suffix}"
+fi
+acceptance_log "creating disposable local database ${acceptance_database}"
+# Once creation is attempted, acknowledgement can no longer prove absence.
+# Arm the idempotent drop before invoking createdb.
+database_drop_required=true
+run_create_database /usr/bin/env -i \
+  HOME="$HOME" USER="$os_user" LOGNAME="$os_user" \
+  PATH=/usr/bin:/bin PSQLRC=/dev/null \
+  /usr/bin/createdb --no-password --template=template0 \
+    --host "$local_pg_socket_dir" --port "$local_pg_port" \
+    --username "$os_user" "$acceptance_database"
+
+# pgvector is not a trusted PostgreSQL extension, so execute one fixed local
+# administrator statement after rechecking the authenticated local target.
+postgres_admin_psql --dbname "$acceptance_database" --set=ON_ERROR_STOP=1 \
+  --set=expected_major="$postgres_major" --set=expected_port="$local_pg_port" \
+  --set=expected_data_directory="$local_pg_data_directory" \
+  --set=expected_database="$acceptance_database" >/dev/null <<'SQL'
+SET search_path = pg_catalog, public;
+SELECT current_setting('server_version_num')::int / 10000 = :'expected_major'::int
+   AND current_setting('port') = :'expected_port'
+   AND current_setting('data_directory') = :'expected_data_directory'
+   AND current_database() = :'expected_database'
+   AND inet_server_addr() IS NULL AS clamp_identity_matches
+\gset
+\if :clamp_identity_matches
+CREATE EXTENSION vector WITH SCHEMA public;
+\else
+\echo 'local_cluster_mismatch'
+\quit 2
+\endif
+SQL
+
+if ! run_command_to_file migrate-local "$CLAMP_PHASE9_SANDBOX/migration.json" \
+    "$kb_binary" --repo "$repo_root" database migrate \
+    --local-database "$acceptance_database" --json; then
+  migration_code="$(/usr/bin/python3 - "$CLAMP_PHASE9_SANDBOX/migration.json" <<'PY'
+import json
+import re
+import sys
+
+try:
+    with open(sys.argv[1], "rb") as source:
+        code = json.load(source).get("code", "unknown")
+except (OSError, ValueError):
+    code = "invalid_result"
+print(code if isinstance(code, str) and re.fullmatch(r"[a-z0-9_]+", code) else "invalid_result")
+PY
+)"
+  phase9_log "disposable local migration failed (${migration_code})"
+  return 1
+fi
+if [[ "$self_check" != true ]]; then
+/usr/bin/python3 - "$CLAMP_PHASE9_SANDBOX/migration.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "rb") as source:
+    result = json.load(source)
+if result.get("ok") is not True or result.get("code") != "database_migrated":
+    raise SystemExit("disposable local migration did not return database_migrated")
+data = result.get("data", {})
+if data.get("ledger_count") != 2 or len(data.get("applied", [])) != 2:
+    raise SystemExit("disposable local migration did not apply the exact two-migration ledger")
+PY
+fi
+
+smoke_evidence="$(run_command extension-ledger-smoke /usr/bin/env -i \
+  HOME="$HOME" USER="$os_user" LOGNAME="$os_user" \
+  PATH=/usr/bin:/bin PSQLRC=/dev/null \
+  /usr/bin/psql --no-psqlrc --quiet --tuples-only --no-align \
+    --set=ON_ERROR_STOP=1 --host "$local_pg_socket_dir" \
+    --port "$local_pg_port" --username "$os_user" \
+    --dbname "$acceptance_database" \
+    --command="SET search_path=pg_catalog,public; SELECT (SELECT extversion FROM pg_catalog.pg_extension WHERE extname='vector'), (SELECT pg_catalog.count(*) FROM public.clamp_schema_migrations), pg_catalog.to_regclass('public.concepts') IS NOT NULL, pg_catalog.to_regclass('public.access_stats') IS NOT NULL, pg_catalog.to_regclass('public.index_state') IS NOT NULL;")"
+if [[ "$self_check" != true && "$smoke_evidence" != '0.8.1|2|t|t|t' ]]; then
+  phase9_log 'local extension and migration-ledger smoke check failed'
+  return 1
+fi
+
+acceptance_log 'forcing the repository-owned unit, integration, cram, contract, and leakage tests'
+run_repository_tests
+acceptance_log 'NOT INCLUDED in this invocation: reviewed Phase 7 CLI cross-version migration; no old executable is accepted from the environment'
+
+acceptance_log 'linting package metadata with the fixed user-local opam binary'
+run_repo_command package-lint "$opam_binary" lint clamp.opam
+
+acceptance_log 'repository-owned local checks passed; the reviewed cross-version case is not part of this invocation and production rollout remains operator-controlled'
+}
+
+run_acceptance
+
+if [[ "$self_check" == true ]]; then
+  self_check_local_psql
+  cleanup_database_if_required
+  [[ "$create_database_armed_at_invocation" == true ]]
+  [[ "$cleanup_database_attempted" == true ]]
+  print_self_check
+fi

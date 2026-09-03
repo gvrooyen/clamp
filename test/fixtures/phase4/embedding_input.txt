@@ -1,0 +1,1 @@
+{"type":"fact","title":"Clamp\nidentity","description":"Stable semantic input","tags":["alpha","alpha","beta"],"body":"First line\nSecond line\n"}
