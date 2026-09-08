@@ -8,9 +8,12 @@ archive="clamp-$version-linux-x86_64.tar.gz"
 
 cd "$repo_root"
 [[ -z "$(git status --porcelain)" ]]
-[[ "$(git rev-parse HEAD)" == "$(git rev-list -n1 "$tag")" ]]
-[[ "$(git rev-parse HEAD)" == "$(git rev-parse "origin/$tag^{}")" ]]
-[[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]]
+head="$(git rev-parse HEAD)"
+remote_main="$(git ls-remote --exit-code origin refs/heads/main | awk 'NR == 1 { print $1 }')"
+remote_tag="$(git ls-remote --exit-code origin "refs/tags/$tag^{}" | awk 'NR == 1 { print $1 }')"
+[[ "$head" == "$(git rev-list -n1 "$tag")" ]]
+[[ "$head" == "$remote_tag" ]]
+[[ "$head" == "$remote_main" ]]
 (cd dist && sha256sum --check "$archive.sha256")
 
 if gh release view "$tag" >/dev/null 2>&1; then
