@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+version="$(sed -nE 's/^\(version ([^)]+)\)$/\1/p' "$repo_root/dune-project")"
+target=linux-x86_64
+archive_name="clamp-${version}-${target}"
+stage="$repo_root/_build/release-package/$archive_name"
+dist="$repo_root/dist"
+
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+[[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]]
+grep -Fqx "version: \"$version\"" "$repo_root/clamp.opam.locked"
+
+cd "$repo_root"
+opam install . --deps-only --with-test --locked --yes
+opam exec -- dune runtest --release test/unit
+opam exec -- dune build --release bin/kb.exe
+
+rm -rf -- "$stage"
+mkdir -p "$stage/bin" "$stage/lib" "$stage/share/licenses" "$dist"
+install -m 0755 _build/default/bin/kb.exe "$stage/bin/kb"
+strip --strip-unneeded "$stage/bin/kb"
+
+if [[ "$($stage/bin/kb --version)" != "$version" ]]; then
+  printf 'Built kb version does not match dune-project version %s.\n' "$version" >&2
+  exit 1
+fi
+
+mapfile -t direct_dependencies < <(
+  ldd "$stage/bin/kb" | awk '$2 == "=>" && $3 ~ /^\// { print $3 } $1 ~ /^\// { print $1 }'
+)
+declare -A visited=()
+queue=("${direct_dependencies[@]}")
+
+is_base_system_library() {
+  case "$1" in
+    ld-linux-*.so.* | libc.so.* | libdl.so.* | libm.so.* | libpthread.so.* | libresolv.so.* | librt.so.* | libutil.so.*)
+      return 0
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+while ((${#queue[@]})); do
+  dependency="${queue[0]}"
+  queue=("${queue[@]:1}")
+  soname="$(basename "$dependency")"
+  is_base_system_library "$soname" && continue
+  [[ -n "${visited[$soname]:-}" ]] && continue
+  visited[$soname]=1
+  install -m 0644 -T "$dependency" "$stage/lib/$soname"
+  while IFS= read -r transitive; do
+    queue+=("$transitive")
+  done < <(ldd "$dependency" | awk '$2 == "=>" && $3 ~ /^\// { print $3 } $1 ~ /^\// { print $1 }')
+done
+
+{
+  printf 'Clamp %s bundled runtime libraries\n\n' "$version"
+  for library in "$stage"/lib/*; do
+    package="$(dpkg-query -S "$(readlink -f "$library")" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
+    if [[ -z "$package" ]]; then
+      package="$(dpkg-query -S "*/$(basename "$library")" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
+    fi
+    [[ -n "$package" ]] || {
+      printf 'Could not identify the package owning %s.\n' "$library" >&2
+      exit 1
+    }
+    package_version="$(dpkg-query -W -f='${Version}' "$package")"
+    printf '%s\t%s\t%s\n' "$(basename "$library")" "$package" "$package_version"
+    copyright="/usr/share/doc/$package/copyright"
+    if [[ -f "$copyright" && ! -f "$stage/share/licenses/$package/copyright" ]]; then
+      mkdir -p "$stage/share/licenses/$package"
+      cp -L "$copyright" "$stage/share/licenses/$package/copyright"
+    fi
+  done
+} >"$stage/THIRD_PARTY_NOTICES"
+
+install -m 0644 LICENSE "$stage/LICENSE"
+cat >"$stage/README.txt" <<EOF
+Clamp $version for Linux x86_64
+
+Run bin/kb directly. The package includes its non-system shared libraries and
+requires only an x86_64 Linux environment with glibc 2.36 or newer; OCaml,
+opam, libpq, and libcurl do not need to be installed.
+
+The kb CLI operates on a Clamp repository. Run it from that repository or pass
+--repo /path/to/repository.
+EOF
+
+rpath="$(readelf -d "$stage/bin/kb" | sed -nE 's/.*\((RPATH|RUNPATH)\).*\[([^]]+)\].*/\2/p')"
+[[ "$rpath" == '$ORIGIN/../lib' ]]
+while IFS= read -r dependency; do
+  soname="$(awk '{print $1}' <<<"$dependency")"
+  resolved="$(awk '$2 == "=>" {print $3}' <<<"$dependency")"
+  if is_base_system_library "$soname"; then
+    continue
+  fi
+  resolved="$(readlink -f "$resolved")"
+  case "$resolved" in
+    "$stage"/lib/*) ;;
+    *)
+      printf 'Packaged binary resolves %s outside its bundle: %s\n' "$soname" "$resolved" >&2
+      exit 1
+      ;;
+  esac
+done < <(ldd "$stage/bin/kb" | grep '=>')
+
+clean_home="$(mktemp -d)"
+trap 'rm -rf -- "$clean_home"' EXIT
+env -i HOME="$clean_home" LANG=C.UTF-8 PATH=/usr/bin:/bin \
+  "$stage/bin/kb" --version | grep -Fqx "$version"
+env -i HOME="$clean_home" LANG=C.UTF-8 PATH=/usr/bin:/bin \
+  "$stage/bin/kb" --json --help >/dev/null
+
+source_date_epoch="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)}"
+archive="$dist/$archive_name.tar.gz"
+rm -f -- "$archive" "$archive.sha256"
+tar --sort=name --format=posix \
+  --pax-option=delete=atime,delete=ctime \
+  --mtime="@$source_date_epoch" --owner=0 --group=0 --numeric-owner \
+  -C "$(dirname "$stage")" -cf - "$archive_name" \
+  | gzip -n -9 >"$archive"
+(
+  cd "$dist"
+  sha256sum "$(basename "$archive")" >"$(basename "$archive").sha256"
+)
+
+printf 'Built %s\n' "$archive"
+cat "$archive.sha256"

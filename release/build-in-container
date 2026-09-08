@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+opam_version=2.5.2
+opam_sha256=edfca2630c373b44b7ee1c2f81cd8dcf67468d0db57d6c02158de553ac63dbd4
+opam_repository_commit=145fce2b2140de3353bafb4039fa64a2fd405ce5
+snapshot=20260824T000000Z
+
+cat >/etc/apt/sources.list.d/debian.sources <<EOF
+Types: deb
+URIs: https://snapshot.debian.org/archive/debian/$snapshot
+Suites: bookworm bookworm-updates
+Components: main
+Check-Valid-Until: no
+
+Types: deb
+URIs: https://snapshot.debian.org/archive/debian-security/$snapshot
+Suites: bookworm-security
+Components: main
+Check-Valid-Until: no
+EOF
+
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+  build-essential ca-certificates curl git libcurl4-gnutls-dev libffi-dev \
+  libpq-dev libyaml-dev m4 pkg-config unzip
+rm -rf /var/lib/apt/lists/*
+
+curl --fail --silent --show-error --location \
+  "https://github.com/ocaml/opam/releases/download/$opam_version/opam-$opam_version-x86_64-linux" \
+  --output /usr/local/bin/opam
+printf '%s  %s\n' "$opam_sha256" /usr/local/bin/opam | sha256sum --check --status
+chmod 0755 /usr/local/bin/opam
+
+git init --quiet /tmp/opam-repository
+git -C /tmp/opam-repository remote add origin https://github.com/ocaml/opam-repository.git
+git -C /tmp/opam-repository fetch --quiet --depth=1 origin "$opam_repository_commit"
+git -C /tmp/opam-repository checkout --quiet FETCH_HEAD
+[[ "$(git -C /tmp/opam-repository rev-parse HEAD)" == "$opam_repository_commit" ]]
+
+export OPAMROOT=/tmp/opam-root OPAMYES=1 OPAMCOLOR=never
+opam init --bare --no-setup --disable-sandboxing --yes default /tmp/opam-repository
+cd "$repo_root"
+opam switch create . "ocaml-base-compiler.$(tr -d '[:space:]' < .ocaml-version)" \
+  --no-install --yes
+release/build

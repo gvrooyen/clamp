@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+version="$(sed -nE 's/^\(version ([^)]+)\)$/\1/p' "$repo_root/dune-project")"
+tag="v$version"
+archive="clamp-$version-linux-x86_64.tar.gz"
+
+cd "$repo_root"
+[[ -z "$(git status --porcelain)" ]]
+[[ "$(git rev-parse HEAD)" == "$(git rev-list -n1 "$tag")" ]]
+[[ "$(git rev-parse HEAD)" == "$(git rev-parse "origin/$tag^{}")" ]]
+[[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]]
+(cd dist && sha256sum --check "$archive.sha256")
+
+if gh release view "$tag" >/dev/null 2>&1; then
+  printf 'GitHub release %s already exists.\n' "$tag" >&2
+  exit 1
+fi
+
+gh release create "$tag" \
+  "dist/$archive" \
+  "dist/$archive.sha256" \
+  --verify-tag --title "Clamp $version" --generate-notes

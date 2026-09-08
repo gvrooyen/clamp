@@ -4,8 +4,9 @@ Clamp is a personal, agent-managed knowledge base for Amp Orbs. It keeps durable
 knowledge and tasks as human-readable, Git-versioned Markdown while using Neon
 Postgres and pgvector for fast semantic retrieval.
 
-> **Status:** Clamp v1 and Phases 0–9 are implemented. Repository-owned
-> acceptance is local-only and does not authorize or prove production
+> **Status:** Clamp v1 and Phases 0–9 are implemented. The pinned 0.1.0
+> production-release build is also implemented. Repository-owned acceptance is
+> local-only and does not authorize production database or publication
 > operations.
 
 The full product and architecture contract is in [PRD.md](./PRD.md), and the
@@ -130,6 +131,7 @@ PLAN.md                           Phased implementation and verification gates
 dune-project                      Dune project metadata
 clamp.opam                        Direct OCaml dependencies and version bounds
 clamp.opam.locked                 Locked transitive OCaml dependencies
+release/                          Pinned Linux x86_64 release builders
 db/migrations/                    Versioned production database migrations
 clamp.yaml                        Versioned non-secret configuration
 TODO.md                           Generated task view; never edit directly
@@ -818,6 +820,35 @@ Environment setup and local acceptance are documented above. During review:
 4. keep secrets outside the repository; and
 5. test against local or isolated database resources, never the production
    Neon branch.
+
+## Production release
+
+Version 0.1.0 is distributed as `clamp-0.1.0-linux-x86_64.tar.gz`. The archive
+contains a stripped native `bin/kb` and its non-system shared libraries. It
+requires only an x86_64 Linux environment with glibc 2.36 or newer; a fresh Orb
+does not need OCaml, opam, libpq, or libcurl installed to run it.
+
+After downloading the archive and its `.sha256` file from the GitHub release:
+
+```bash
+sha256sum --check clamp-0.1.0-linux-x86_64.tar.gz.sha256
+tar -xzf clamp-0.1.0-linux-x86_64.tar.gz
+./clamp-0.1.0-linux-x86_64/bin/kb --version
+```
+
+The binary operates on a Clamp checkout. Run it from the checkout or pass
+`--repo /path/to/clamp`. Keep the extracted `bin/` and `lib/` directories
+together because the executable resolves its bundled libraries relative to
+itself.
+
+`release/build` creates and validates the archive locally from the committed
+opam lock and runs the unit suite in Dune's release profile. The canonical
+container builder additionally fixes the Debian build image by digest, Debian
+package snapshot, opam executable checksum, opam repository commit, OCaml
+version, and transitive OCaml dependencies. After an exactly matching
+`v<dune-project version>` tag and commit are present on `origin`,
+`release/publish` verifies the clean source, remote refs, and archive checksum
+before publishing the archive and checksum to the corresponding GitHub release.
 
 Clamp is distributed under the [MIT License](./LICENSE). Package metadata points
 to the intended public repository at `github.com/gvrooyen/clamp`.

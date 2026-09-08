@@ -8,8 +8,9 @@ implementation order, verification gates, and rollout discipline. If work
 uncovers a product ambiguity, stop at the relevant phase gate and update the
 PRD deliberately rather than hiding a decision in code.
 
-Clamp v1 and Phases 0–9 are implemented. Repository-owned acceptance remains
-local-only; production deployment is an operator-controlled gate.
+Clamp v1, Phases 0–9, and the pinned 0.1.0 production-release build are
+implemented. Repository-owned acceptance remains local-only; production
+deployment and release-tag publication are operator-controlled gates.
 
 ## Delivery principles
 
@@ -120,6 +121,34 @@ conventions before implementing product behavior.
 - A clean login shell in an Orb can run `kb --version` and `kb --json --help`.
 - Golden tests cover JSON envelope shape, exit classes, and secret redaction.
 - `.agents/setup` succeeds twice and `.agents/resume` succeeds once.
+
+## Production release build
+
+**Status:** implemented for version 0.1.0. Publishing the `v0.1.0` tag and
+GitHub release remains an operator-controlled external action.
+
+### Deliverables
+
+- Build the native executable with Dune's reproducible release mode from the
+  exact committed opam lock, after passing the unit suite in the release
+  profile.
+- Fix the Linux x86_64 build environment by container digest, Debian snapshot,
+  opam checksum, and opam-repository commit.
+- Bundle the non-glibc shared-library closure behind an origin-relative RPATH,
+  with package versions and third-party license notices.
+- Produce a deterministic `clamp-<version>-linux-x86_64.tar.gz` and SHA-256
+  checksum.
+- After an exactly matching `v<version>` tag and commit reach `origin`, use the
+  guarded publisher to verify the refs and checksum before creating the GitHub
+  release with the prebuilt archive and checksum.
+
+### Verification and exit gate
+
+- The staged binary reports the Dune project version under an empty
+  environment and renders JSON help.
+- Every non-glibc dependency resolves inside the staged archive.
+- Repeating the build for the same source epoch produces the same archive
+  checksum.
 
 ## Phase 1: Configuration, OKF parsing, and bundle validation
 

@@ -2,10 +2,11 @@
 
 ## Status
 
-Clamp v1 and Phases 0–9 are implemented. The blocking product and architecture
-decisions are resolved; retrieval coefficients remain tunable operational
-defaults rather than product invariants. Repository-owned acceptance is
-local-only; production deployment remains operator-controlled.
+Clamp v1, Phases 0–9, and the pinned 0.1.0 production-release build are
+implemented. The blocking product and architecture decisions are resolved;
+retrieval coefficients remain tunable operational defaults rather than product
+invariants. Repository-owned acceptance is local-only; production deployment
+and release-tag publication remain operator-controlled.
 
 ## Product summary
 
@@ -91,6 +92,24 @@ The system has three data classes:
 Postgres as a whole is therefore not described as a fully rebuildable cache;
 only its concept index is rebuildable. Neon-managed recovery is useful for
 telemetry, but telemetry loss is an accepted v1 failure mode.
+
+## Production distribution
+
+The 0.1.0 release provides a stripped native Linux x86_64 `kb` executable and
+bundles its non-system shared-library closure. A fresh Amp Orb with glibc 2.36
+or newer must run `kb --version` and `kb --json --help` from the extracted
+archive without installing OCaml, opam, libpq, or libcurl. The executable uses
+an origin-relative RPATH so its libraries do not modify the process environment
+or affect Git subprocesses.
+
+The canonical release build pins the container image digest, Debian archive
+snapshot, opam binary checksum, opam-repository commit, OCaml compiler, Dune,
+and all transitive OCaml packages. It emits a deterministic tar archive, a
+SHA-256 checksum, bundled-library versions, and applicable third-party license
+notices. A release tag must exactly match the version declared by the Dune
+project and executable. The publisher must verify that the local commit, remote
+main, and remote release tag agree before creating a GitHub release. Tag and
+release publication remain operator-controlled external actions.
 
 ## Repository layout
 

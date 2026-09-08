@@ -1,4 +1,6 @@
 (executable
  (name kb)
  (public_name kb)
- (libraries clamp cmdliner))
+ (libraries clamp cmdliner)
+ (link_flags
+  (:standard -cclib -Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib)))

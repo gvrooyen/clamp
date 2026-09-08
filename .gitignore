@@ -1,5 +1,6 @@
 _build/
 _opam/
+dist/
 *.install
 compile_commands.json
 coverage/
