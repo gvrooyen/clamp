@@ -181,6 +181,64 @@ let run_validate options =
   | Ok validation -> render_validation options validation
   | Error issue -> emit_local ~command:"validate" options (Error issue)
 
+let emit_init options = function
+  | Ok (created : Clamp.Initializer.created) ->
+      emit
+        ~human:(Printf.sprintf "Initialized private Clamp repository at %s."
+                  created.path)
+        ~command:"init" options "repository_initialized"
+        (`Assoc
+          [ ("path", `String created.path);
+            ("source_repository", `String created.source_repository);
+            ("runtime_revision", `String created.runtime_revision) ])
+  | Error (failure : Clamp.Initializer.error) ->
+      let exit_class = Clamp.Initializer.exit_class failure in
+      let result =
+        Clamp.Cli_result.failure ~exit_class ~code:failure.code
+          ~message:failure.message ~details:(`Assoc [])
+      in
+      emit_diagnostic options ~command:"init" ~exit_class;
+      if options.json then print_endline (Clamp.Cli_result.to_json_string result)
+      else if not options.quiet then Printf.eprintf "kb: %s\n" failure.message;
+      Clamp.Exit_class.code exit_class
+
+let init =
+  let required names docv doc =
+    Arg.(required & opt (some string) None & info names ~docv ~doc)
+  in
+  let source_repository =
+    required [ "source-repository" ] "HOST/PATH"
+      "Set the durable private origin identity written to clamp.yaml."
+  and runtime_version =
+    required [ "runtime-version" ] "VERSION"
+      "Pin the runtime release version used by generated Orb setup."
+  and runtime_revision =
+    required [ "runtime-revision" ] "COMMIT"
+      "Pin the exact 40-character public Clamp commit."
+  and runtime_url =
+    required [ "runtime-url" ] "HTTPS-URL"
+      "Pin the credential-free x86-64 runtime archive URL."
+  and runtime_sha256 =
+    required [ "runtime-sha256" ] "SHA256"
+      "Pin the lowercase SHA-256 digest of the runtime archive."
+  and runtime_root =
+    Arg.(value & opt (some string) None
+      & info [ "runtime-root" ] ~docv:"PATH"
+          ~doc:"Override the runtime root containing share/clamp/templates; intended for package tests.")
+  in
+  Cmd.v
+    (command_info "init"
+       "Create a complete private Clamp consumer repository without implementation source.")
+    Term.(const
+      (fun source_repository runtime_version runtime_revision runtime_url
+           runtime_sha256 runtime_root options ->
+        Clamp.Initializer.create ~target:options.repo_root ~source_repository
+          ~runtime_version ~runtime_revision ~runtime_url ~runtime_sha256
+          ?runtime_root ()
+        |> emit_init options)
+      $ source_repository $ runtime_version $ runtime_revision $ runtime_url
+      $ runtime_sha256 $ runtime_root $ common_options)
+
 let placeholder_term command operands =
   Term.(const (fun _ options -> run_placeholder command options) $ operands $ common_options)
 
@@ -395,21 +453,37 @@ let database =
     Arg.(value & opt (some string) None & info [ "local-database" ] ~docv:"NAME"
       ~doc:"Apply by identifier to the configured local PostgreSQL 15 main Unix-socket cluster. Ignores ambient libpq targets and never accepts a URL or service.")
   in
+  let migrations_dir =
+    Arg.(value & opt (some string) None
+      & info [ "migrations-dir" ] ~docv:"PATH"
+          ~doc:"Load the authoritative ordered SQL migrations from PATH instead of REPO/db/migrations. Runtime installations use this to keep implementation assets outside private knowledge repositories.")
+  in
   let migrate =
     Cmd.v (command_info "migrate" "Apply checksum-verified ordered SQL migrations using the direct database connection.")
-      Term.(const (fun local_database options ->
+      Term.(const (fun local_database migrations_dir options ->
         let result =
           match local_database with
-          | Some database -> Clamp.Database.migrate_local ~repo:options.repo_root ~database
+          | Some database ->
+              (match migrations_dir with
+              | Some migrations_dir ->
+                  Clamp.Database.migrate_local_from ~migrations_dir ~database
+              | None ->
+                  Clamp.Database.migrate_local ~repo:options.repo_root ~database)
           | None ->
               (match Sys.getenv_opt "KB_DATABASE_DIRECT_URL" with
-              | Some url when url <> "" -> Clamp.Database.migrate_remote ~repo:options.repo_root ~url
+              | Some url when url <> "" ->
+                  (match migrations_dir with
+                  | Some migrations_dir ->
+                      Clamp.Database.migrate_remote_from ~migrations_dir ~url
+                  | None ->
+                      Clamp.Database.migrate_remote ~repo:options.repo_root ~url)
               | _ -> Error { Clamp.Database.kind = Validation;
                              code = "database_direct_url_missing";
                              message = "KB_DATABASE_DIRECT_URL is required.";
                              finalization = Before_commit_dispatch })
         in
-        emit_database options result) $ local_database $ common_options)
+        emit_database options result)
+        $ local_database $ migrations_dir $ common_options)
   in
   Cmd.group (command_info "database" "Maintain the Clamp database schema.") [ migrate ]
 
@@ -578,6 +652,7 @@ let command =
   let doc = "Native CLI for the Clamp knowledge base." in
   let commands =
     [
+      init;
       search;
       get;
       concept_mutation "add" "Create a concept.";
@@ -613,14 +688,16 @@ let inspect_fallback_argv argv =
   let missing_value = ref false in
   let repo = ref "." and command = ref "kb" and selection = ref Top in
   let top_commands =
-    [ "add"; "edit"; "verify"; "deprecate"; "todo"; "validate"; "task";
+    [ "init"; "add"; "edit"; "verify"; "deprecate"; "todo"; "validate"; "task";
       "database"; "config"; "search"; "get"; "sync"; "publish" ]
   in
   let task_commands = [ "add"; "list"; "start"; "block"; "done"; "cancel" ] in
   let value_options =
     [ "--repo"; "--repo-root"; "--input"; "--claim"; "--superseded-by";
       "--closure-authority"; "--verification-authority"; "--local-database";
-      "--commit"; "--thread-id" ]
+      "--migrations-dir"; "--source-repository"; "--runtime-version";
+      "--runtime-revision"; "--runtime-url"; "--runtime-sha256";
+      "--runtime-root"; "--commit"; "--thread-id" ]
   in
   let boolean_options =
     [ "--json"; "--quiet"; "-q"; "--diagnostic"; "--stdin";

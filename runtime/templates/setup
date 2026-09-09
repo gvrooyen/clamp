@@ -1,0 +1,492 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+runtime_lock="$repo_root/.agents/clamp-runtime.lock"
+cli_install_root="$HOME/.local/share/clamp/kb"
+cli_active="$HOME/.local/bin/kb"
+runtime_version=''
+cli_revision=''
+runtime_url=''
+runtime_sha256=''
+cli_install_dir=''
+runtime_migrations=''
+postgres_major=15
+pgvector_version=0.8.1
+pgvector_sha256=a9094dfb85ccdde3cbb295f1086d4c71a20db1d26bf1d6c39f07a7d164033eb4
+local_database=clamp_test
+trusted_0001_sha256=b669a28b01e6f0a7336b2df63b3b743596a01ecbd42df4e493590fef91549ced
+expected_pg_socket_dir=/var/run/postgresql
+expected_pg_data_directory=/var/lib/postgresql/15/main
+local_pg_socket_dir=''
+local_pg_port=''
+local_pg_data_directory=''
+
+log() {
+  printf '[clamp setup] %s\n' "$*"
+}
+
+run_stage() {
+  local label="$1" started=$SECONDS
+  shift
+
+  log "starting ${label}"
+  "$@"
+  log "finished ${label} in $((SECONDS - started))s"
+}
+
+load_runtime_lock() {
+  local lines
+
+  [[ -f "$runtime_lock" && ! -L "$runtime_lock" ]]
+  mapfile -t lines < "$runtime_lock"
+  if (( ${#lines[@]} != 4 )) \
+     || [[ ! "${lines[0]}" =~ ^version=([0-9A-Za-z.-]{1,64})$ ]] \
+     || [[ ! "${lines[1]}" =~ ^revision=([0-9a-f]{40})$ ]] \
+     || [[ ! "${lines[2]}" =~ ^url=(https://[^@[:space:]]{1,2039})$ ]] \
+     || [[ ! "${lines[3]}" =~ ^sha256=([0-9a-f]{64})$ ]]; then
+    printf '[clamp setup] invalid runtime lock in %s\n' "$runtime_lock" >&2
+    return 1
+  fi
+  runtime_version="${lines[0]#version=}"
+  cli_revision="${lines[1]#revision=}"
+  runtime_url="${lines[2]#url=}"
+  runtime_sha256="${lines[3]#sha256=}"
+  cli_install_dir="$cli_install_root/$cli_revision"
+  runtime_migrations="$cli_install_dir/share/clamp/migrations"
+}
+
+install_system_packages() {
+  local package packages_missing=false
+  local packages=(
+    "postgresql-${postgres_major}"
+    "postgresql-client-${postgres_major}"
+    "postgresql-server-dev-${postgres_major}"
+    build-essential
+    ca-certificates
+    curl
+    git
+    libcurl3-gnutls
+    libpq-dev
+    libyaml-0-2
+    pkg-config
+    rsync
+    unzip
+  )
+
+  for package in "${packages[@]}"; do
+    if ! dpkg-query --show --showformat='${Status}' "$package" 2>/dev/null \
+      | grep -Fqx 'install ok installed'; then
+      packages_missing=true
+      break
+    fi
+  done
+
+  if [[ "$packages_missing" == true ]]; then
+    log 'installing Clamp runtime and local PostgreSQL prerequisites'
+    sudo apt-get update -qq
+    sudo env DEBIAN_FRONTEND=noninteractive \
+      apt-get install -y --no-install-recommends "${packages[@]}"
+  fi
+}
+
+install_runtime() {
+  local archive temp_dir payload staged_link selected
+  [[ "$(uname -m)" == x86_64 ]]
+  mkdir -p "$cli_install_root" "$HOME/.local/bin"
+
+  if [[ ! -x "$cli_install_dir/bin/kb" \
+        || "$(cat "$cli_install_dir/REVISION" 2>/dev/null || true)" != "$cli_revision" ]]; then
+    temp_dir="$(mktemp -d "$cli_install_root/.runtime-${cli_revision}.XXXXXXXX")"
+    trap 'rm -rf -- "${temp_dir:-}"' RETURN
+    archive="$temp_dir/runtime.tar.gz"
+    curl --fail --silent --show-error --location --proto '=https' \
+      --tlsv1.2 --retry 3 --connect-timeout 10 --max-time 120 \
+      --max-filesize 16777216 "$runtime_url" --output "$archive"
+    printf '%s  %s\n' "$runtime_sha256" "$archive" | sha256sum --check --status
+
+    python3 - "$archive" "$runtime_version" "$cli_revision" <<'PY'
+import sys, tarfile
+archive, version, revision = sys.argv[1:]
+prefix = f"clamp-runtime-{version}-linux-x86_64/"
+expected = {
+    prefix + "bin/kb", prefix + "REVISION", prefix + "VERSION",
+    prefix + "LICENSE", prefix + "share/clamp/migrations/0001_enable_vector.sql",
+    prefix + "share/clamp/migrations/0002_application_schema.sql",
+    prefix + "share/clamp/templates/setup", prefix + "share/clamp/templates/resume",
+    prefix + "share/clamp/templates/skill.md", prefix + "share/clamp/templates/AGENTS.md",
+    prefix + "share/clamp/templates/README.md", prefix + "share/clamp/templates/gitignore",
+}
+with tarfile.open(archive, "r:gz") as value:
+    files = set()
+    total = 0
+    for member in value.getmembers():
+        if member.issym() or member.islnk() or not (member.isdir() or member.isfile()):
+            raise SystemExit("unsafe runtime archive entry")
+        if not member.name.startswith(prefix) or "/../" in "/" + member.name:
+            raise SystemExit("unsafe runtime archive path")
+        if member.isfile():
+            files.add(member.name); total += member.size
+    if files != expected or total > 16 * 1024 * 1024:
+        raise SystemExit("unexpected runtime archive contents")
+PY
+    tar --extract --gzip --file "$archive" --directory "$temp_dir" \
+      --no-same-owner --no-same-permissions
+    payload="$temp_dir/clamp-runtime-${runtime_version}-linux-x86_64"
+    [[ "$(cat "$payload/REVISION")" == "$cli_revision" ]]
+    [[ "$(cat "$payload/VERSION")" == "$runtime_version" ]]
+    "$payload/bin/kb" --version >/dev/null
+    "$payload/bin/kb" validate --repo "$repo_root" --json >/dev/null
+    chmod -R go-w "$payload"
+    if ! mv -T -- "$payload" "$cli_install_dir" 2>/dev/null; then
+      [[ -x "$cli_install_dir/bin/kb" \
+         && "$(cat "$cli_install_dir/REVISION")" == "$cli_revision" ]]
+    fi
+    rm -rf -- "$temp_dir"
+    trap - RETURN
+  fi
+
+  runtime_migrations="$cli_install_dir/share/clamp/migrations"
+  "$cli_install_dir/bin/kb" validate --repo "$repo_root" --json >/dev/null
+  staged_link="$(mktemp "$HOME/.local/bin/.kb.XXXXXXXX")"
+  rm -- "$staged_link"
+  ln -s "$cli_install_dir/bin/kb" "$staged_link"
+  mv -Tf -- "$staged_link" "$cli_active"
+  export PATH="$HOME/.local/bin:$PATH"
+  hash -r
+  selected="$(command -v kb)"
+  [[ "$(readlink -f "$selected")" == "$cli_install_dir/bin/kb" ]]
+  log "activated public kb ${cli_revision} at ${selected}"
+}
+
+install_pgvector() {
+  local control_file installed_version temp_dir source_dir
+
+  control_file="/usr/share/postgresql/${postgres_major}/extension/vector.control"
+  installed_version=''
+  if [[ -f "$control_file" ]]; then
+    installed_version="$(sed -nE "s/^default_version[[:space:]]*=[[:space:]]*'([^']+)'.*/\\1/p" "$control_file")"
+  fi
+
+  if [[ "$installed_version" != "$pgvector_version" ]]; then
+    log "installing pgvector ${pgvector_version} for PostgreSQL ${postgres_major}"
+    temp_dir="$(mktemp -d)"
+    trap 'rm -rf -- "${temp_dir:-}"' RETURN
+
+    curl --fail --silent --show-error --location --retry 3 \
+      "https://github.com/pgvector/pgvector/archive/refs/tags/v${pgvector_version}.tar.gz" \
+      --output "$temp_dir/pgvector.tar.gz"
+    printf '%s  %s\n' "$pgvector_sha256" "$temp_dir/pgvector.tar.gz" \
+      | sha256sum --check --status
+    tar -xzf "$temp_dir/pgvector.tar.gz" -C "$temp_dir"
+    source_dir="$temp_dir/pgvector-${pgvector_version}"
+
+    make -j"$(nproc)" -C "$source_dir" \
+      PG_CONFIG="/usr/lib/postgresql/${postgres_major}/bin/pg_config"
+    sudo make -C "$source_dir" install \
+      PG_CONFIG="/usr/lib/postgresql/${postgres_major}/bin/pg_config"
+
+    trap - RETURN
+    rm -rf -- "$temp_dir"
+  fi
+}
+
+postgres_cluster_setting() {
+  local key="$1" output prefix value
+  output="$(/usr/bin/pg_conftool "$postgres_major" main show "$key")"
+  prefix="$key = "
+  [[ "$output" == "$prefix"* ]]
+  value="${output#"$prefix"}"
+  if [[ "$value" == "'"*"'" && ${#value} -ge 2 ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+
+discover_local_postgres_target() {
+  local socket_directories entry found=false
+  local_pg_port="$(postgres_cluster_setting port)"
+  socket_directories="$(postgres_cluster_setting unix_socket_directories)"
+  IFS=',' read -ra configured_socket_dirs <<< "$socket_directories"
+  for entry in "${configured_socket_dirs[@]}"; do
+    entry="${entry#"${entry%%[![:space:]]*}"}"
+    entry="${entry%"${entry##*[![:space:]]}"}"
+    [[ "$entry" == "$expected_pg_socket_dir" ]] && found=true
+  done
+  [[ "$found" == true ]]
+  local_pg_socket_dir="$expected_pg_socket_dir"
+  local_pg_data_directory="$(postgres_cluster_setting data_directory)"
+  [[ "$local_pg_port" =~ ^[0-9]+$ ]]
+  (( local_pg_port >= 1 && local_pg_port <= 65535 ))
+  [[ "$local_pg_data_directory" == "$expected_pg_data_directory" ]]
+}
+
+postgres_admin_psql() {
+  sudo -u postgres env -i HOME=/var/lib/postgresql USER=postgres LOGNAME=postgres \
+    PATH=/usr/bin:/bin PSQLRC=/dev/null /usr/bin/psql --no-psqlrc \
+    --host "$local_pg_socket_dir" --port "$local_pg_port" \
+    --username postgres "$@"
+}
+
+validate_trusted_0001() {
+  local file="$runtime_migrations/0001_enable_vector.sql"
+  if ! env -i PATH=/usr/bin:/bin /usr/bin/python3 - \
+      "$file" "$trusted_0001_sha256" >/dev/null 2>&1 <<'PY'
+import hashlib
+import os
+import stat
+import sys
+
+path, expected = sys.argv[1:]
+limit = 8 * 1024 * 1024
+fd = None
+try:
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW)
+    before = os.fstat(fd)
+    if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid()
+            or before.st_mode & 0o022 or before.st_size < 0
+            or before.st_size > limit):
+        raise ValueError
+    chunks = []
+    total = 0
+    while total <= limit:
+        chunk = os.read(fd, min(65536, limit + 1 - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    after = os.fstat(fd)
+    pathname = os.lstat(path)
+    identity = lambda value: (
+        value.st_dev, value.st_ino, value.st_mode, value.st_uid, value.st_gid,
+        value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+    data = b''.join(chunks)
+    if (total > limit or total != before.st_size
+            or identity(before) != identity(after)
+            or identity(after) != identity(pathname)
+            or hashlib.sha256(data).hexdigest() != expected):
+        raise ValueError
+except BaseException:
+    sys.exit(1)
+finally:
+    if fd is not None:
+        try:
+            os.close(fd)
+        except OSError:
+            sys.exit(1)
+PY
+  then
+    printf '[clamp setup] migration_0001_untrusted: migration 0001 does not match its trusted identity\n' >&2
+    return 1
+  fi
+}
+
+ensure_local_postgres() {
+  local config_dir tuning_file tuning_temp cluster_changed=false os_user target_evidence
+
+  # Repository migration bytes are untrusted until this succeeds. Keep this
+  # ahead of cluster status, readiness, psql, or any other database connection.
+  validate_trusted_0001
+
+  if [[ ! -f "/etc/postgresql/${postgres_major}/main/postgresql.conf" ]]; then
+    log "creating local PostgreSQL ${postgres_major} cluster"
+    sudo pg_createcluster "$postgres_major" main
+  fi
+
+  discover_local_postgres_target
+
+  config_dir="/etc/postgresql/${postgres_major}/main/conf.d"
+  tuning_file="$config_dir/clamp-orb.conf"
+  tuning_temp="$(mktemp)"
+  cat > "$tuning_temp" <<'EOF'
+# Local ephemeral Clamp test database. Favor speed over durability.
+fsync = off
+synchronous_commit = off
+full_page_writes = off
+autovacuum = off
+EOF
+  sudo mkdir -p "$config_dir"
+  if ! sudo test -f "$tuning_file" || ! sudo cmp --silent "$tuning_temp" "$tuning_file"; then
+    sudo install -m 0644 "$tuning_temp" "$tuning_file"
+    cluster_changed=true
+  fi
+  rm -f -- "$tuning_temp"
+
+  if sudo pg_ctlcluster "$postgres_major" main status >/dev/null 2>&1; then
+    if [[ "$cluster_changed" == true ]]; then
+      log 'restarting local PostgreSQL after configuration change'
+      sudo pg_ctlcluster "$postgres_major" main restart
+    fi
+  else
+    log 'starting local PostgreSQL'
+    sudo pg_ctlcluster "$postgres_major" main start
+  fi
+
+  [[ -S "$local_pg_socket_dir/.s.PGSQL.$local_pg_port" ]]
+
+  os_user="$(id -un)"
+  postgres_admin_psql --dbname postgres --set=ON_ERROR_STOP=1 \
+    --set=role_name="$os_user" --set=db_name="$local_database" \
+    --set=expected_major="$postgres_major" \
+    --set=expected_port="$local_pg_port" \
+    --set=expected_data_directory="$local_pg_data_directory" <<'SQL'
+SET search_path = pg_catalog, public;
+SELECT current_setting('server_version_num')::int / 10000 = :'expected_major'::int
+   AND current_setting('port') = :'expected_port'
+   AND current_setting('data_directory') = :'expected_data_directory'
+   AND inet_server_addr() IS NULL AS clamp_identity_matches
+\gset
+\if :clamp_identity_matches
+SELECT format('CREATE ROLE %I LOGIN CREATEDB', :'role_name')
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'role_name')
+\gexec
+SELECT format('GRANT pg_read_all_settings TO %I', :'role_name')
+\gexec
+\else
+\echo 'local_cluster_mismatch'
+\quit 2
+\endif
+SELECT current_setting('server_version_num')::int / 10000 = :'expected_major'::int
+   AND current_setting('port') = :'expected_port'
+   AND current_setting('data_directory') = :'expected_data_directory'
+   AND inet_server_addr() IS NULL AS clamp_identity_matches
+\gset
+\if :clamp_identity_matches
+SELECT format('CREATE DATABASE %I OWNER %I', :'db_name', :'role_name')
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = :'db_name')
+\gexec
+\else
+\echo 'local_cluster_mismatch'
+\quit 2
+\endif
+SQL
+
+  # pgvector requires local administrator privilege. Execute a fixed bootstrap
+  # statement only after authenticating 15/main and validating migration 0001's
+  # independent trusted identity; repository SQL runs only through the ledger.
+  postgres_admin_psql --dbname "$local_database" --set=ON_ERROR_STOP=1 \
+    --set=expected_major="$postgres_major" --set=expected_port="$local_pg_port" \
+    --set=expected_data_directory="$local_pg_data_directory" >/dev/null <<'SQL'
+SET search_path = pg_catalog, public;
+SELECT current_setting('server_version_num')::int / 10000 = :'expected_major'::int
+   AND current_setting('port') = :'expected_port'
+   AND current_setting('data_directory') = :'expected_data_directory'
+   AND inet_server_addr() IS NULL AS clamp_identity_matches
+\gset
+\if :clamp_identity_matches
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
+SELECT pg_catalog.count(*) OPERATOR(pg_catalog.=) 1
+   AND pg_catalog.bool_and(
+     e.extnamespace OPERATOR(pg_catalog.=) n.oid
+     AND t.typnamespace OPERATOR(pg_catalog.=) n.oid
+     AND td.deptype OPERATOR(pg_catalog.=) 'e'
+     AND td.refobjid OPERATOR(pg_catalog.=) e.oid
+     AND oc.opcnamespace OPERATOR(pg_catalog.=) n.oid
+     AND am.amname OPERATOR(pg_catalog.=) 'hnsw'
+     AND od.deptype OPERATOR(pg_catalog.=) 'e'
+     AND od.refobjid OPERATOR(pg_catalog.=) e.oid) AS clamp_vector_identity_matches
+FROM pg_catalog.pg_extension e
+JOIN pg_catalog.pg_namespace n
+  ON n.nspname OPERATOR(pg_catalog.=) 'public'
+ AND n.oid OPERATOR(pg_catalog.=) e.extnamespace
+JOIN pg_catalog.pg_type t
+  ON t.typname OPERATOR(pg_catalog.=) 'vector'
+ AND t.typnamespace OPERATOR(pg_catalog.=) n.oid
+JOIN pg_catalog.pg_depend td
+  ON td.classid OPERATOR(pg_catalog.=) 'pg_catalog.pg_type'::pg_catalog.regclass
+ AND td.objid OPERATOR(pg_catalog.=) t.oid
+ AND td.objsubid OPERATOR(pg_catalog.=) 0
+ AND td.refclassid OPERATOR(pg_catalog.=) 'pg_catalog.pg_extension'::pg_catalog.regclass
+JOIN pg_catalog.pg_opclass oc
+  ON oc.opcname OPERATOR(pg_catalog.=) 'vector_cosine_ops'
+ AND oc.opcnamespace OPERATOR(pg_catalog.=) n.oid
+JOIN pg_catalog.pg_am am
+  ON am.oid OPERATOR(pg_catalog.=) oc.opcmethod
+ AND am.amname OPERATOR(pg_catalog.=) 'hnsw'
+JOIN pg_catalog.pg_depend od
+  ON od.classid OPERATOR(pg_catalog.=) 'pg_catalog.pg_opclass'::pg_catalog.regclass
+ AND od.objid OPERATOR(pg_catalog.=) oc.oid
+ AND od.objsubid OPERATOR(pg_catalog.=) 0
+ AND od.refclassid OPERATOR(pg_catalog.=) 'pg_catalog.pg_extension'::pg_catalog.regclass
+WHERE e.extname OPERATOR(pg_catalog.=) 'vector'
+\gset
+\if :clamp_vector_identity_matches
+\else
+\echo 'vector_extension_invalid'
+\quit 2
+\endif
+\else
+\echo 'local_cluster_mismatch'
+\quit 2
+\endif
+SQL
+
+  env -i HOME="$HOME" USER="$os_user" LOGNAME="$os_user" PATH=/usr/bin:/bin \
+    "$cli_active" --repo "$repo_root" database migrate \
+      --migrations-dir "$runtime_migrations" \
+      --local-database "$local_database" --quiet
+
+  target_evidence="$(postgres_admin_psql --dbname "$local_database" --quiet --tuples-only --no-align \
+    --set=ON_ERROR_STOP=1 \
+    --command="SET search_path=pg_catalog,public; SELECT pg_catalog.current_setting('server_version_num')::int / 10000, pg_catalog.current_setting('data_directory'), pg_catalog.current_setting('port'), pg_catalog.inet_server_addr() IS NULL, extversion FROM pg_catalog.pg_extension WHERE extname = 'vector';")"
+  [[ "$target_evidence" == "${postgres_major}|${local_pg_data_directory}|${local_pg_port}|t|${pgvector_version}" ]]
+  log "local database ${local_database} is ready on ${local_pg_socket_dir} port ${local_pg_port} with PostgreSQL ${postgres_major} main and pgvector ${pgvector_version}"
+}
+
+check_project_secrets() {
+  local missing=0 secret
+
+  for secret in KB_DATABASE_URL KB_DATABASE_DIRECT_URL OPENROUTER_API_KEY; do
+    if [[ -n "${!secret-}" ]]; then
+      log "project secret ${secret}: present"
+    else
+      log "project secret ${secret}: missing"
+      missing=1
+    fi
+  done
+
+  if (( missing )); then
+    log 'warning: external Clamp features will be unavailable until missing project secrets are configured'
+  fi
+}
+
+verify_clean_login_shell() {
+  log 'verifying the persisted runtime in a clean login shell'
+  touch "$HOME/.bash_profile"
+  if ! grep -Fqx '# Clamp runtime' "$HOME/.bash_profile"; then
+    cat >> "$HOME/.bash_profile" <<'EOF'
+
+# Clamp runtime
+export PATH="$HOME/.local/bin:$PATH"
+EOF
+  fi
+  env -i \
+    HOME="$HOME" \
+    USER="$(id -un)" \
+    LOGNAME="$(id -un)" \
+    SHELL=/bin/bash \
+    PATH=/usr/bin:/bin \
+    /bin/bash -lc "
+      selected=\"\$(command -v kb)\" \
+      && test \"\$(readlink -f \"\$selected\")\" = '$cli_install_dir/bin/kb' \
+      && test \"\$(cat '$cli_install_dir/REVISION')\" = '$cli_revision' \
+      && kb --version \
+      && kb --repo '$repo_root' --json --help >/dev/null \
+      && kb validate --repo '$repo_root' --json >/dev/null"
+}
+
+main() {
+  load_runtime_lock
+  run_stage 'system package check/install' install_system_packages
+  run_stage 'pinned runtime installation' install_runtime
+  validate_trusted_0001
+  run_stage 'pgvector check/install' install_pgvector
+  run_stage 'local PostgreSQL initialization' ensure_local_postgres
+  run_stage 'project secret check' check_project_secrets
+  run_stage 'clean login verification' verify_clean_login_shell
+  log 'setup complete; Neon and OpenRouter were not contacted or modified'
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

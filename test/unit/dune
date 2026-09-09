@@ -78,3 +78,9 @@
   (source_tree ../../lib)
   (source_tree ..))
  (libraries alcotest str unix yojson))
+
+(test
+ (name initializer_test)
+ (modules initializer_test)
+ (deps (source_tree ../../runtime/templates))
+ (libraries clamp alcotest unix))

@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+version="${1:?usage: scripts/build-runtime VERSION REVISION OUTPUT-DIRECTORY}"
+revision="${2:?usage: scripts/build-runtime VERSION REVISION OUTPUT-DIRECTORY}"
+output_dir="${3:?usage: scripts/build-runtime VERSION REVISION OUTPUT-DIRECTORY}"
+
+[[ "$(uname -m)" == x86_64 ]]
+[[ "$version" =~ ^[0-9A-Za-z.-]{1,64}$ ]]
+[[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+[[ "$(git -C "$repo_root" rev-parse HEAD)" == "$revision" ]]
+[[ -z "$(git -C "$repo_root" status --porcelain --untracked-files=no)" ]]
+
+runtime_name="clamp-runtime-${version}-linux-x86_64"
+archive_name="${runtime_name}.tar.gz"
+stage="$(mktemp -d)"
+trap 'rm -rf -- "$stage"' EXIT
+
+OPAMSWITCH="${OPAMSWITCH:-$repo_root}" opam exec -- dune build @all
+mkdir -p "$stage/$runtime_name/bin" \
+  "$stage/$runtime_name/share/clamp/migrations" \
+  "$stage/$runtime_name/share/clamp/templates" "$output_dir"
+install -m 0755 "$repo_root/_build/default/bin/kb.exe" \
+  "$stage/$runtime_name/bin/kb"
+install -m 0644 "$repo_root"/db/migrations/*.sql \
+  "$stage/$runtime_name/share/clamp/migrations/"
+install -m 0755 "$repo_root/runtime/templates/setup" \
+  "$repo_root/runtime/templates/resume" \
+  "$stage/$runtime_name/share/clamp/templates/"
+install -m 0644 "$repo_root/runtime/templates/skill.md" \
+  "$repo_root/runtime/templates/AGENTS.md" \
+  "$repo_root/runtime/templates/README.md" \
+  "$repo_root/runtime/templates/gitignore" \
+  "$stage/$runtime_name/share/clamp/templates/"
+install -m 0644 "$repo_root/LICENSE" "$stage/$runtime_name/LICENSE"
+printf '%s\n' "$revision" > "$stage/$runtime_name/REVISION"
+printf '%s\n' "$version" > "$stage/$runtime_name/VERSION"
+
+TZ=UTC tar --sort=name --mtime='2026-01-01 00:00:00Z' \
+  --owner=0 --group=0 --numeric-owner --format=ustar \
+  -C "$stage" -cf - "$runtime_name" \
+  | gzip -n -9 > "$output_dir/$archive_name"
+(cd "$output_dir" && sha256sum "$archive_name" > "$archive_name.sha256")
+gzip -t "$output_dir/$archive_name"
+printf '%s\n' "$output_dir/$archive_name"

@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+runtime_lock="$repo_root/.agents/clamp-runtime.lock"
+postgres_major=15
+local_database=clamp_test
+expected_socket_dir=/var/run/postgresql
+expected_data_directory=/var/lib/postgresql/15/main
+
+mapfile -t runtime_lock_lines < "$runtime_lock"
+if (( ${#runtime_lock_lines[@]} != 4 )) \
+   || [[ ! "${runtime_lock_lines[0]}" =~ ^version=[0-9A-Za-z.-]{1,64}$ ]] \
+   || [[ ! "${runtime_lock_lines[1]}" =~ ^revision=[0-9a-f]{40}$ ]] \
+   || [[ ! "${runtime_lock_lines[2]}" =~ ^url=https://[^@[:space:]]{1,2039}$ ]] \
+   || [[ ! "${runtime_lock_lines[3]}" =~ ^sha256=[0-9a-f]{64}$ ]]; then
+  echo '[clamp resume] public runtime lock is invalid; rerun .agents/setup after repairing it' >&2
+  exit 1
+fi
+cli_revision="${runtime_lock_lines[1]#revision=}"
+expected_cli="$HOME/.local/share/clamp/kb/$cli_revision/bin/kb"
+installed_marker="$HOME/.local/share/clamp/kb/$cli_revision/REVISION"
+selected_cli="$(command -v kb 2>/dev/null || true)"
+
+if [[ ! -x "$expected_cli" || ! -f "$installed_marker" \
+      || "$(cat "$installed_marker" 2>/dev/null || true)" != "$cli_revision" \
+      || -z "$selected_cli" \
+      || "$(readlink -f "$selected_cli" 2>/dev/null || true)" != "$expected_cli" ]]; then
+  echo "[clamp resume] public kb pin mismatch; expected ${cli_revision}; rerun .agents/setup" >&2
+  exit 1
+fi
+
+echo "[clamp resume] public kb ${cli_revision} is active at ${selected_cli}"
+
+if ! command -v pg_ctlcluster >/dev/null 2>&1 \
+   || ! command -v pg_conftool >/dev/null 2>&1; then
+  echo '[clamp resume] PostgreSQL is missing; rerun .agents/setup' >&2
+  exit 1
+fi
+
+setting() {
+  local key="$1" output prefix value
+  output="$(/usr/bin/pg_conftool "$postgres_major" main show "$key")"
+  prefix="$key = "
+  [[ "$output" == "$prefix"* ]]
+  value="${output#"$prefix"}"
+  if [[ "$value" == "'"*"'" && ${#value} -ge 2 ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+
+port="$(setting port)"
+socket_directories="$(setting unix_socket_directories)"
+data_directory="$(setting data_directory)"
+[[ ",$socket_directories," == *",$expected_socket_dir,"* \
+   || ",$socket_directories," == *", $expected_socket_dir,"* ]]
+socket_dir="$expected_socket_dir"
+[[ "$port" =~ ^[0-9]+$ && "$data_directory" == "$expected_data_directory" ]]
+
+ready() {
+  env -i HOME="$HOME" USER="$(id -un)" LOGNAME="$(id -un)" PATH=/usr/bin:/bin \
+    /usr/bin/pg_isready --quiet --host "$socket_dir" --port "$port" \
+      --username "$(id -un)" --dbname "$local_database"
+}
+
+if ! ready; then
+  echo '[clamp resume] starting local PostgreSQL'
+  timeout 8s sudo pg_ctlcluster "$postgres_major" main start
+fi
+
+if ! ready; then
+  echo '[clamp resume] local PostgreSQL did not become ready' >&2
+  exit 1
+fi
+
+evidence="$(sudo -u postgres env -i HOME=/var/lib/postgresql USER=postgres \
+  LOGNAME=postgres PATH=/usr/bin:/bin PSQLRC=/dev/null \
+  /usr/bin/psql --no-psqlrc --host "$socket_dir" --port "$port" \
+  --username postgres --dbname postgres --quiet --tuples-only --no-align \
+  --set=ON_ERROR_STOP=1 \
+  --command="SET search_path=pg_catalog,public; SELECT pg_catalog.current_setting('server_version_num')::int / 10000, pg_catalog.current_setting('data_directory'), pg_catalog.current_setting('port'), pg_catalog.inet_server_addr() IS NULL;")"
+if [[ "$evidence" != "${postgres_major}|${data_directory}|${port}|t" ]]; then
+  echo '[clamp resume] local PostgreSQL identity verification failed' >&2
+  exit 1
+fi
+
+echo "[clamp resume] local PostgreSQL ${postgres_major} main is ready on ${socket_dir} port ${port}"

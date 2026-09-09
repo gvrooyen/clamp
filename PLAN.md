@@ -807,6 +807,23 @@ The normal Phase 9 runner reports the historical cross-version case as not
 included. Operators must record environment-specific rollout evidence outside
 the reusable source baseline.
 
+### Source-free private-consumer distribution
+
+- Build a reproducible Linux x86-64 runtime archive from an exact clean source
+  commit with `kb`, migrations, templates, license, and revision/version
+  markers only.
+- Publish its SHA-256 beside the archive and require generated private
+  repositories to pin version, revision, HTTPS URL, and digest.
+- Provide `kb init` to create a complete local private knowledge repository on
+  `main` without implementation source, a remote, a push, production access,
+  or paid requests.
+- Have generated Orb setup verify and install the runtime outside the private
+  repository, apply bundled migrations only to disposable local PostgreSQL,
+  and atomically retain the previous executable if installation fails.
+- Acceptance requires a fresh No Project Amp Orb to initialize the private
+  repository, run setup twice and resume once, validate the empty bundle, and
+  confirm no implementation tree or remote was introduced.
+
 ### Final rollout sequence
 
 1. Confirm all local tests and static checks pass under the lockfile.

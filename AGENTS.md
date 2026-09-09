@@ -161,6 +161,10 @@
 - Use the versions and dependencies pinned by `.ocaml-version`, `clamp.opam`,
   and `clamp.opam.locked`. Keep `.agents/setup` non-interactive, idempotent, and
   safe to run after an Orb snapshot restore.
+- Keep the Linux x86-64 runtime archive source-free except for the `kb`
+  executable, versioned migrations, private-repository templates, license, and
+  exact version/revision markers. Generated private repositories pin its HTTPS
+  URL and SHA-256 and must not contain or build Clamp implementation source.
 - Read concept content for synchronization from Git objects at the selected
   remote commit, not from the mutable worktree.
 - Preserve existing access stats when a path survives sync. Apply concept

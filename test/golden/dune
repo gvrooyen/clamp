@@ -2,4 +2,5 @@
  (deps
   %{bin:kb}
   ../../clamp.yaml
+  (source_tree ../../runtime/templates)
   (source_tree ../fixtures)))

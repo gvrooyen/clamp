@@ -112,7 +112,11 @@ val resolve_host_with :
   (string list, [ `Timeout | `Resolve | `Invalid ]) result
 
 val migrate_remote : repo:string -> url:string -> (migration_report, error) result
+val migrate_remote_from :
+  migrations_dir:string -> url:string -> (migration_report, error) result
 val migrate_local : repo:string -> database:string -> (migration_report, error) result
+val migrate_local_from :
+  migrations_dir:string -> database:string -> (migration_report, error) result
 val discover_local_target : unit -> (local_target, error) result
 val exit_class : error -> Exit_class.t
 

@@ -1192,8 +1192,7 @@ let migration_name name =
     Some (number, String.sub name 0 (String.length name - 4))
   else None
 
-let load_migrations repo =
-  let directory = Filename.concat repo "db/migrations" in
+let load_migrations directory =
   let trusted_path = Filename.concat directory "0001_enable_vector.sql" in
   Result.bind (read_trusted_0001 trusted_path) (fun trusted_0001 -> try
     let sql_files =
@@ -1566,8 +1565,8 @@ let apply_migrations ?local_target connection migrations =
                       Result.map (fun () -> report)
                         (validate_final_ledger connection migrations)))))))
 
-let with_migrations repo operation =
-  Result.bind (load_migrations repo) (fun migrations ->
+let with_migrations directory operation =
+  Result.bind (load_migrations directory) (fun migrations ->
       if migrations = [] || (List.hd migrations).position <> 1
                          || (List.hd migrations).version <> "0001_enable_vector" then
         error Validation "migration_sequence_invalid" "Migration sequence must begin with 0001_enable_vector."
@@ -1677,21 +1676,24 @@ let with_remote_connection ~url operation =
               protect_connection (fun () -> connect_round 1 None)
                 operation))
 
-let migrate_remote ~repo ~url =
+let migrate_remote_from ~migrations_dir ~url =
   Result.bind (validate_remote_url url) (fun () ->
-      with_migrations repo (fun migrations ->
+      with_migrations migrations_dir (fun migrations ->
           with_remote_connection ~url (fun connection ->
               apply_migrations connection migrations)))
+
+let migrate_remote ~repo ~url =
+  migrate_remote_from ~migrations_dir:(Filename.concat repo "db/migrations") ~url
 
 let valid_local_database database =
   String.length database >= 1 && String.length database <= 63
   && (match database.[0] with 'a' .. 'z' | 'A' .. 'Z' | '_' -> true | _ -> false)
   && String.for_all (function 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true | _ -> false) database
 
-let migrate_local ~repo ~database =
+let migrate_local_from ~migrations_dir ~database =
   if not (valid_local_database database) then
     error Validation "local_database_invalid" "Local database name is invalid."
-  else with_migrations repo (fun migrations ->
+  else with_migrations migrations_dir (fun migrations ->
       Result.bind (discover_local_target ()) (fun target ->
           let user = (Unix.getpwuid (Unix.geteuid ())).pw_name in
           with_clean_local_environment (fun () ->
@@ -1702,6 +1704,10 @@ let migrate_local ~repo ~database =
                          ~startonly:true ()))
                   (fun connection ->
                     apply_migrations ~local_target:target connection migrations))))
+
+let migrate_local ~repo ~database =
+  migrate_local_from ~migrations_dir:(Filename.concat repo "db/migrations")
+    ~database
 
 let nullable result row column = if result#getisnull row column then None else Some (result#getvalue row column)
 

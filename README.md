@@ -67,6 +67,7 @@ email delivery.
 The native OCaml `kb` CLI now exposes the approved command tree:
 
 ```text
+kb init
 kb search <query>
 kb get <concept-id>
 kb add [concept-id]
@@ -94,6 +95,12 @@ available now:
 ```bash
 kb --version
 kb --json --help
+kb init --repo /home/user/workspace/repo \
+  --source-repository example.invalid/owner/private-clamp \
+  --runtime-version <release-version> \
+  --runtime-revision <40-hex-release-commit> \
+  --runtime-url <https-runtime-archive-url> \
+  --runtime-sha256 <64-hex-archive-sha256> --json
 kb validate --json
 kb search "query" --json
 kb get facts/example --json
@@ -114,6 +121,25 @@ All executable commands accept `--repo`/`--repo-root`, `--json`, `--quiet`, and
 Stable exit classes are `0` success, `2` validation/user error, `3` conflict,
 `4` authentication, `5` transient external failure, `6` stale index, and `70`
 internal failure. JSON callers use result codes rather than parsing messages.
+
+## Source-free private repositories
+
+Official v0.1 runtime releases target Linux x86-64 Amp Orbs. Each archive
+contains the native `kb` executable, authoritative SQL migrations,
+private-repository templates, the MIT license, and exact version and source
+revision markers. After verifying the release archive SHA-256, run its
+`bin/kb init` command as shown above. Initialization creates a local private Git
+repository on `main` with `clamp.yaml`, an empty valid knowledge taxonomy,
+deterministic `TODO.md`, the knowledge-management skill, Orb lifecycle hooks,
+and `.agents/clamp-runtime.lock`. It does not create a remote or perform any
+network, production database, publication, sync, or embedding operation.
+
+The generated `.agents/setup` downloads and verifies only the pinned runtime,
+installs it under `$HOME/.local/share/clamp/kb/<revision>`, atomically activates
+`$HOME/.local/bin/kb`, and prepares disposable local PostgreSQL. The private
+repository deliberately contains no `bin/`, `lib/`, `test/`, `db/`, Dune, opam,
+or other Clamp implementation files. Upgrade it by reviewing and changing all
+four runtime-lock fields together, then rerunning setup and validation.
 
 ## Repository layout
 
@@ -661,7 +687,7 @@ email address is required in the repository or Orb environment.
 
 ## Orb development environment
 
-Every fresh Orb runs `.agents/setup`. It:
+This source repository's `.agents/setup` prepares a development Orb. It:
 
 - installs checksum-pinned opam and creates a repo-local switch with the pinned
   OCaml compiler and locked Dune/project dependencies;

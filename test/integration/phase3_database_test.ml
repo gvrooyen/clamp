@@ -302,11 +302,11 @@ let migration_and_schema () =
       with_migration_copy (fun root migrations ->
           check_report "fresh migration"
             [ "0001_enable_vector"; "0002_application_schema" ]
-            (Clamp.Database.migrate_local ~repo:root ~database);
+            (Clamp.Database.migrate_local_from ~migrations_dir:migrations ~database);
           check_report
             ~expected_already:[ "0001_enable_vector"; "0002_application_schema" ]
             "idempotent rerun" []
-            (Clamp.Database.migrate_local ~repo:root ~database);
+            (Clamp.Database.migrate_local_from ~migrations_dir:migrations ~database);
           let connection = connection database in
           constraints connection;
           Alcotest.(check int) "ledger rows" 2 (List.length (ledger_rows connection));
@@ -316,7 +316,7 @@ let migration_and_schema () =
           output_string output "\n-- checksum drift\n";
           close_out output;
           check_error "checksum rejection" "migration_checksum_mismatch"
-            (Clamp.Database.migrate_local ~repo:root ~database)))
+            (Clamp.Database.migrate_local_from ~migrations_dir:migrations ~database)))
 
 let trusted_0001_rejection () =
   with_database "untrusted" (fun database ->

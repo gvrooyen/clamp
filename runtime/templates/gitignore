@@ -1,0 +1,5 @@
+/.clamp/
+.env
+.env.*
+!.env.example
+*.log

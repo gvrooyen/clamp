@@ -454,6 +454,8 @@ service.
 
 The CLI provides at least:
 
+- `kb init` — create a source-free private knowledge repository from a pinned
+  Linux x86-64 runtime release, without creating or pushing a remote.
 - `kb search <query>` — semantic search returning metadata and snippets.
 - `kb get <concept-id>` — return full concept content and record an access.
 - `kb add`, `kb edit`, `kb verify`, `kb deprecate` — concept mutations.
@@ -469,6 +471,16 @@ The CLI provides at least:
 Commands offer machine-readable `--json` output so the skill can distinguish
 validation, conflict, authentication, network, and indexing failures without
 parsing prose.
+
+The public distribution also provides a Linux x86-64 runtime archive containing
+only the native executable, authoritative migrations, private-repository
+templates, license, and exact version/revision markers. `kb init` copies those
+templates into a newly initialized private Git repository and records a
+four-field runtime lock (version, revision, HTTPS release URL, and SHA-256).
+The generated setup verifies and installs that exact archive outside the
+private repository; it never checks out or builds the implementation source.
+V1 does not create a remote, push, migrate production, synchronize production,
+or make an embedding request during initialization or setup.
 
 The repo-local `managing-clamp-knowledge` Amp skill instructs an agent to:
 

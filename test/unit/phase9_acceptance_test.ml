@@ -250,11 +250,12 @@ let documentation_and_cli_contract_drift () =
   List.iter
     (fun (scope, command) ->
       check_contains ("README command " ^ command) readme command;
-      if command <> "kb database migrate" then
+      if command <> "kb database migrate" && command <> "kb init" then
         check_contains ("skill command " ^ command) skill command;
       check_contains ("CLI help command " ^ command) scope
         (command |> String.split_on_char ' ' |> List.rev |> List.hd))
-    [ (successful_help [ "--help=plain" ], "kb search");
+    [ (successful_help [ "--help=plain" ], "kb init");
+      (successful_help [ "--help=plain" ], "kb search");
       (successful_help [ "--help=plain" ], "kb get");
       (successful_help [ "--help=plain" ], "kb add");
       (successful_help [ "--help=plain" ], "kb edit");
