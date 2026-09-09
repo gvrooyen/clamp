@@ -17,8 +17,19 @@ grep -Fqx "version: \"$version\"" "$repo_root/clamp.opam.locked"
 
 cd "$repo_root"
 opam install . --deps-only --with-test --locked --yes
-opam exec -- dune runtest --release test/unit
 opam exec -- dune build --release bin/kb.exe
+unit_tests=(
+  contract_test upgrade_test phase1_test phase2_test phase3_test phase4_test
+  phase6_test phase8_skill_test initializer_test
+)
+unit_test_targets=()
+for test in "${unit_tests[@]}"; do
+  unit_test_targets+=("test/unit/$test.exe")
+done
+opam exec -- dune build --release "${unit_test_targets[@]}"
+for test in "${unit_tests[@]}"; do
+  (cd _build/default/test/unit && DUNE_SOURCEROOT="$repo_root" "./$test.exe")
+done
 
 rm -rf -- "$stage"
 mkdir -p "$stage/bin" "$stage/lib" "$stage/share/licenses" \
@@ -97,8 +108,9 @@ requires only an x86_64 Linux environment with glibc 2.36 or newer; OCaml,
 opam, libpq, and libcurl do not need to be installed.
 
 The archive also contains the authoritative SQL migrations and templates used
-to initialize source-free private knowledge repositories. See the public Clamp
-README for the required kb init release URL, revision, and SHA-256 arguments.
+to initialize source-free private knowledge repositories. Use bin/kb init with
+--release or --latest to derive a verified runtime pin automatically. See the
+public Clamp README for setup instructions and the explicit offline pin form.
 
 For release 0.1.3 and newer, bin/kb upgrade can replace this complete package
 in place. That operation additionally requires the base system's /usr/bin/tar.

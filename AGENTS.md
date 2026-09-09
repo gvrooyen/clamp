@@ -204,7 +204,7 @@
   exact clean original main/HEAD/index/worktree and baseline-shape checks; fail
   closed without discarding user work when those checks do not hold.
 - Conflict email uses Amp's current-thread-owner email capability. Include the
-  direct thread URL, branch, commit, and paths—never knowledge bodies or
+  direct thread URL, branch, commit, and paths–never knowledge bodies or
   secrets. Do not email for ordinary network, authentication, embedding,
   database, or stale-index failures.
 - A successful Git publication is never reverted solely because indexing

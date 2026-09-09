@@ -237,7 +237,7 @@ let perform ~allow_http ~timeout_ms ~meth ~url ~api_key ~body =
         Curl.set_timeoutms handle timeout_ms;
         Curl.set_sslverifypeer handle true;
         Curl.set_sslverifyhost handle Curl.SSLVERIFYHOST_HOSTNAME;
-        Curl.set_useragent handle "clamp/0.1.3";
+        Curl.set_useragent handle "clamp/0.1.4";
         Curl.set_httpheader handle
           ([ "Accept: application/json"; "Authorization: Bearer " ^ api_key ]
           @ if meth = `POST then [ "Content-Type: application/json" ] else []);

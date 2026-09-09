@@ -3241,7 +3241,7 @@ let render_todo ~now tasks =
              let overdue = if task_is_overdue ~now task.due then " **OVERDUE**" else "" in
              let draft = if is_unverified_draft task then " **DRAFT · UNVERIFIED**" else "" in
              let due =
-               match task.due with None -> "" | Some value -> " — due " ^ due_display value
+               match task.due with None -> "" | Some value -> " – due " ^ due_display value
              in
              Printf.sprintf "- [%s](knowledge/%s.md)%s%s%s `%s`\n"
                (markdown_label task.title) task.id overdue draft due task.priority)

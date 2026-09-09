@@ -1,4 +1,6 @@
-let source_root = if Sys.file_exists ".agents/skills" then "." else "../.."
+let source_root =
+  Option.value (Sys.getenv_opt "DUNE_SOURCEROOT")
+    ~default:(if Sys.file_exists ".agents/skills" then "." else "../..")
 
 let skill_path =
   Filename.concat source_root

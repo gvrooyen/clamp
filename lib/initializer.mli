@@ -17,4 +17,9 @@ val create :
   unit ->
   (created, error) Stdlib.result
 
+val preflight :
+  target:string ->
+  source_repository:string ->
+  (unit, error) Stdlib.result
+
 val exit_class : error -> Exit_class.t

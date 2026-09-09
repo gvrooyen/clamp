@@ -3,7 +3,7 @@ Top-level metadata is available without executing product behavior.
   $ unset KB_DATABASE_URL KB_DATABASE_DIRECT_URL OPENROUTER_API_KEY
   $ repo="$PWD/fixture"; mkdir -p "$repo/knowledge"; cp -L ../../clamp.yaml "$repo/"; kb --repo "$repo" todo --quiet
   $ kb --version
-  0.1.3
+  0.1.4
 
 Initialization creates a complete source-free private repository without
 network or production operations.
@@ -18,6 +18,18 @@ network or production operations.
   $ test ! -e "$private/bin" && test ! -e "$private/lib" && test ! -e "$private/test" && test ! -e "$private/db"
   $ kb validate --repo "$private" --json
   {"ok":true,"code":"bundle_valid","data":{"concepts":0,"reserved_documents":0,"diagnostics":[]}}
+  $ kb init --help=plain | grep -E -- '--release=X.Y.Z|--latest' | sed 's/^ *//'
+  --latest
+  --release=X.Y.Z
+  $ kb init --source-repository example.invalid/owner/private-clamp --json
+  {"ok":false,"code":"init_runtime_selection_required","message":"Supply exactly one runtime selection: --release X.Y.Z, --latest, or all four explicit --runtime-* pin options.","details":{}}
+  [2]
+  $ kb init --repo "$PWD/invalid-release" --source-repository example.invalid/owner/private-clamp --release invalid --json
+  {"ok":false,"code":"init_release_version_invalid","message":"--release must be a stable X.Y.Z release version.","details":{}}
+  [2]
+  $ kb init --source-repository example.invalid/owner/private-clamp --release 0.1.3 --latest --json
+  {"ok":false,"code":"init_runtime_selection_required","message":"Supply exactly one runtime selection: --release X.Y.Z, --latest, or all four explicit --runtime-* pin options.","details":{}}
+  [2]
 
 Retrieval commands fail safely before external access when credentials are absent.
 

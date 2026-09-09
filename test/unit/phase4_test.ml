@@ -3,8 +3,11 @@ let parse value =
   | Ok concept -> concept
   | Error message -> Alcotest.fail message
 
+let project_root =
+  Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:"../.."
+
 let fixture name =
-  let path = "../fixtures/phase4/" ^ name in
+  let path = Filename.concat project_root ("test/fixtures/phase4/" ^ name) in
   let channel = open_in_bin path in
   Fun.protect ~finally:(fun () -> close_in channel) (fun () ->
       really_input_string channel (in_channel_length channel))

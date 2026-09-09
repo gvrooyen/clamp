@@ -13,12 +13,13 @@ let rec mkdirs path =
     Unix.mkdir path 0o700
   end
 
+let source_root =
+  Option.value (Sys.getenv_opt "DUNE_SOURCEROOT")
+    ~default:(if Sys.file_exists "runtime/templates" then "." else "../..")
+
 let runtime_root root =
   let templates = Filename.concat root "share/clamp/templates" in
-  let source =
-    if Sys.file_exists "runtime/templates" then "runtime/templates"
-    else "../../runtime/templates"
-  in
+  let source = Filename.concat source_root "runtime/templates" in
   mkdirs templates;
   [ "setup"; "resume"; "skill.md"; "AGENTS.md"; "README.md"; "gitignore" ]
   |> List.iter (fun name ->

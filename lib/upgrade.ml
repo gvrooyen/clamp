@@ -15,6 +15,14 @@ type success = {
   changed : bool;
 }
 
+type release = {
+  version : string;
+  revision : string;
+  url : string;
+  sha256 : string;
+  runtime_root : string;
+}
+
 let error kind code message = Error { kind; code; message }
 
 let exit_class error =
@@ -123,7 +131,7 @@ let fetch ~maximum_bytes url =
         Curl.set_timeoutms handle 30000;
         Curl.set_sslverifypeer handle true;
         Curl.set_sslverifyhost handle Curl.SSLVERIFYHOST_HOSTNAME;
-        Curl.set_useragent handle "clamp/0.1.3";
+        Curl.set_useragent handle "clamp/0.1.4";
         Curl.set_httpheader handle
           [ "Accept: application/vnd.github+json";
             "X-GitHub-Api-Version: 2022-11-28" ];
@@ -267,6 +275,139 @@ let required_release_layout root =
   in
   regular "bin/kb" && regular "README.txt" && regular "LICENSE"
   && regular "THIRD_PARTY_NOTICES" && directory "lib"
+
+let valid_revision value =
+  String.length value = 40
+  && String.for_all
+       (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
+       value
+
+let with_release_archive ~version ~archive ~checksum:checksum_contents action =
+  if not (valid_version version) then
+    error Validation "upgrade_version_invalid"
+      "--version must be a stable X.Y.Z release version."
+  else
+    Result.bind (checksum ~version checksum_contents) (fun expected ->
+        let actual = Digestif.SHA256.(to_hex (digest_string archive)) in
+        if actual <> expected then
+          error Transient "upgrade_checksum_mismatch"
+            "The downloaded Clamp release failed SHA-256 verification."
+        else
+          let temporary =
+            Filename.concat (Filename.get_temp_dir_name ())
+              (".clamp-release-" ^ random_hex ())
+          in
+          let archive_root = "clamp-" ^ version ^ "-linux-x86_64" in
+          let archive_path = Filename.concat temporary (archive_name version) in
+          let listing_path = Filename.concat temporary "archive.list" in
+          let sizes_path = Filename.concat temporary "archive.sizes" in
+          let version_path = Filename.concat temporary "candidate.version" in
+          let extraction = Filename.concat temporary "extract" in
+          let finish result =
+            cleanup temporary;
+            result
+          in
+          try
+            Unix.mkdir temporary 0o700;
+            Unix.mkdir extraction 0o700;
+            write_file archive_path archive;
+            let listed =
+              run_process ~stdout:listing_path "/usr/bin/tar"
+                [ "-tzf"; archive_path ]
+            in
+            let listing = read_file_limited listing_path maximum_metadata_bytes in
+            if not listed || Option.is_none listing then
+              finish
+                (error Transient "upgrade_archive_invalid"
+                   "The downloaded Clamp release archive is invalid.")
+            else
+              let entries =
+                Option.get listing |> String.split_on_char '\n'
+                |> List.filter (fun value -> value <> "")
+              in
+              if
+                entries = []
+                || not
+                     (List.for_all (valid_archive_path ~root:archive_root) entries)
+              then
+                finish
+                  (error Transient "upgrade_archive_invalid"
+                     "The downloaded Clamp release archive has an unsafe layout.")
+              else if
+                not
+                  (run_process ~stdout:sizes_path "/usr/bin/tar"
+                     [ "-tvzf"; archive_path; "--numeric-owner" ])
+                || not
+                     (Option.exists archive_sizes_safe
+                        (read_file_limited sizes_path maximum_metadata_bytes))
+              then
+                finish
+                  (error Transient "upgrade_archive_too_large"
+                     "The downloaded Clamp release expands beyond its safety limit.")
+              else if
+                not
+                  (run_process ~stdout:(Filename.concat temporary "extract.out")
+                     "/usr/bin/tar"
+                     [ "-xzf"; archive_path; "-C"; extraction;
+                       "--no-same-owner"; "--no-same-permissions" ])
+              then
+                finish
+                  (error Transient "upgrade_archive_invalid"
+                     "The downloaded Clamp release archive could not be extracted.")
+              else
+                let candidate = Filename.concat extraction archive_root in
+                if not (required_release_layout candidate && regular_tree candidate)
+                then
+                  finish
+                    (error Transient "upgrade_archive_invalid"
+                       "The downloaded Clamp release package is incomplete.")
+                else
+                  let version_marker =
+                    read_file_limited (Filename.concat candidate "VERSION") 128
+                  and revision_marker =
+                    read_file_limited (Filename.concat candidate "REVISION") 128
+                  in
+                  (match (version_marker, revision_marker) with
+                  | Some version_marker, Some revision_marker
+                    when version_marker = version ^ "\n"
+                         && String.ends_with ~suffix:"\n" revision_marker ->
+                      let revision =
+                        String.sub revision_marker 0
+                          (String.length revision_marker - 1)
+                      in
+                      if not (valid_revision revision) then
+                        finish
+                          (error Transient "upgrade_archive_invalid"
+                             "The downloaded Clamp release markers are invalid.")
+                      else begin
+                        Unix.chmod (Filename.concat candidate "bin/kb") 0o755;
+                        let candidate_runs =
+                          run_process ~stdout:version_path
+                            (Filename.concat candidate "bin/kb") [ "--version" ]
+                        in
+                        let reported = read_file_limited version_path 128 in
+                        if not candidate_runs || reported <> Some (version ^ "\n")
+                        then
+                          finish
+                            (error Transient "upgrade_candidate_invalid"
+                               "The downloaded Clamp binary did not report the requested version.")
+                        else
+                          let url, _ = release_urls ~version in
+                          let result =
+                            action
+                              { version; revision; url; sha256 = expected;
+                                runtime_root = candidate }
+                          in
+                          finish (Ok result)
+                      end
+                  | _ ->
+                      finish
+                        (error Transient "upgrade_archive_invalid"
+                           "The downloaded Clamp release markers are invalid."))
+          with _ ->
+            finish
+              (error Internal "upgrade_internal_error"
+                 "The Clamp upgrade failed unexpectedly."))
 
 let same_identity left right = left.Secure_fs.device = right.Secure_fs.device && left.inode = right.inode
 
@@ -442,6 +583,22 @@ let resolve = function
         |> successful_download ~not_found:"No latest Clamp release exists.")
         latest_version
 
+let with_release request action =
+  Result.bind (resolve request) (fun version ->
+      let archive_url, checksum_url = release_urls ~version in
+      Result.bind
+        (fetch ~maximum_bytes:maximum_archive_bytes archive_url
+        |> successful_download
+             ~not_found:("Clamp release " ^ version ^ " does not exist."))
+        (fun archive ->
+          Result.bind
+            (fetch ~maximum_bytes:maximum_metadata_bytes checksum_url
+            |> successful_download
+                 ~not_found:("Clamp release " ^ version
+                            ^ " has no checksum asset."))
+            (fun checksum ->
+              with_release_archive ~version ~archive ~checksum action)))
+
 let run ~current_version request =
   Result.bind (resolve request) (fun version ->
       if version = current_version then
@@ -473,4 +630,5 @@ module For_test = struct
   let checksum = checksum
   let release_urls = release_urls
   let install_archive = install_archive
+  let with_release_archive = with_release_archive
 end

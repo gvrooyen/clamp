@@ -79,6 +79,7 @@
   (source_tree ../../.agents)
   (source_tree ../../bin)
   (source_tree ../../db)
+  (source_tree ../../docs)
   (source_tree ../../knowledge)
   (source_tree ../../lib)
   (source_tree ..))

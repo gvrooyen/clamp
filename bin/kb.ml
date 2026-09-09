@@ -7,7 +7,7 @@ type common_options = {
   diagnostic : bool;
 }
 
-let version = "0.1.3"
+let version = "0.1.4"
 
 let exits =
   let info kind doc = Cmd.Exit.info ~doc (Clamp.Exit_class.code kind) in
@@ -202,42 +202,121 @@ let emit_init options = function
       else if not options.quiet then Printf.eprintf "kb: %s\n" failure.message;
       Clamp.Exit_class.code exit_class
 
+let emit_init_release options = function
+  | Ok result -> emit_init options result
+  | Error (failure : Clamp.Upgrade.error) ->
+      let exit_class = Clamp.Upgrade.exit_class failure in
+      let suffix =
+        if String.starts_with ~prefix:"upgrade_" failure.code then
+          String.sub failure.code 8 (String.length failure.code - 8)
+        else failure.code
+      in
+      let code = "init_release_" ^ suffix in
+      let message =
+        match failure.code with
+        | "upgrade_version_invalid" ->
+            "--release must be a stable X.Y.Z release version."
+        | "upgrade_internal_error" ->
+            "The Clamp release could not be prepared for initialization."
+        | _ -> failure.message
+      in
+      let result =
+        Clamp.Cli_result.failure ~exit_class ~code ~message ~details:(`Assoc [])
+      in
+      emit_diagnostic options ~command:"init" ~exit_class;
+      if options.json then print_endline (Clamp.Cli_result.to_json_string result)
+      else if not options.quiet then Printf.eprintf "kb: %s\n" message;
+      Clamp.Cli_result.exit_code result
+
+let run_init_release request source_repository options =
+  match
+    Clamp.Initializer.preflight ~target:options.repo_root ~source_repository
+  with
+  | Error _ as failure -> emit_init options failure
+  | Ok () ->
+      Clamp.Upgrade.with_release request
+        (fun (resolved : Clamp.Upgrade.release) ->
+          Clamp.Initializer.create ~target:options.repo_root ~source_repository
+            ~runtime_version:resolved.version
+            ~runtime_revision:resolved.revision ~runtime_url:resolved.url
+            ~runtime_sha256:resolved.sha256
+            ~runtime_root:resolved.runtime_root ())
+      |> emit_init_release options
+
 let init =
-  let required names docv doc =
-    Arg.(required & opt (some string) None & info names ~docv ~doc)
+  let optional names docv doc =
+    Arg.(value & opt (some string) None & info names ~docv ~doc)
   in
   let source_repository =
-    required [ "source-repository" ] "HOST/PATH"
-      "Set the durable private origin identity written to clamp.yaml."
+    Arg.(required & opt (some string) None
+      & info [ "source-repository" ] ~docv:"HOST/PATH"
+          ~doc:"Set the durable private origin identity written to clamp.yaml.")
+  and selected_release =
+    optional [ "release" ] "X.Y.Z"
+      "Initialize with the exact stable public Clamp release X.Y.Z."
+  and latest =
+    Arg.(value & flag
+      & info [ "latest" ]
+          ~doc:"Initialize with GitHub's latest stable public Clamp release.")
   and runtime_version =
-    required [ "runtime-version" ] "VERSION"
-      "Pin the runtime release version used by generated Orb setup."
+    optional [ "runtime-version" ] "VERSION"
+      "Explicitly pin the runtime release version used by generated Orb setup."
   and runtime_revision =
-    required [ "runtime-revision" ] "COMMIT"
-      "Pin the exact 40-character public Clamp commit."
+    optional [ "runtime-revision" ] "COMMIT"
+      "Explicitly pin the exact 40-character public Clamp commit."
   and runtime_url =
-    required [ "runtime-url" ] "HTTPS-URL"
-      "Pin the credential-free x86-64 runtime archive URL."
+    optional [ "runtime-url" ] "HTTPS-URL"
+      "Explicitly pin the credential-free x86-64 runtime archive URL."
   and runtime_sha256 =
-    required [ "runtime-sha256" ] "SHA256"
-      "Pin the lowercase SHA-256 digest of the runtime archive."
+    optional [ "runtime-sha256" ] "SHA256"
+      "Explicitly pin the lowercase SHA-256 digest of the runtime archive."
   and runtime_root =
     Arg.(value & opt (some string) None
       & info [ "runtime-root" ] ~docv:"PATH"
           ~doc:"Override the runtime root containing share/clamp/templates; intended for package tests.")
   in
+  let selection_error options =
+    let message =
+      "Supply exactly one runtime selection: --release X.Y.Z, --latest, or all four explicit --runtime-* pin options."
+    in
+    let result =
+      Clamp.Cli_result.failure ~exit_class:User_error
+        ~code:"init_runtime_selection_required" ~message ~details:(`Assoc [])
+    in
+    emit_diagnostic options ~command:"init" ~exit_class:User_error;
+    if options.json then print_endline (Clamp.Cli_result.to_json_string result)
+    else if not options.quiet then Printf.eprintf "kb: %s\n" message;
+    Clamp.Cli_result.exit_code result
+  in
   Cmd.v
     (command_info "init"
        "Create a complete private Clamp consumer repository without implementation source.")
     Term.(const
-      (fun source_repository runtime_version runtime_revision runtime_url
-           runtime_sha256 runtime_root options ->
-        Clamp.Initializer.create ~target:options.repo_root ~source_repository
-          ~runtime_version ~runtime_revision ~runtime_url ~runtime_sha256
-          ?runtime_root ()
-        |> emit_init options)
-      $ source_repository $ runtime_version $ runtime_revision $ runtime_url
-      $ runtime_sha256 $ runtime_root $ common_options)
+      (fun source_repository selected_release latest runtime_version
+           runtime_revision runtime_url runtime_sha256 runtime_root options ->
+        match
+          ( selected_release,
+            latest,
+            runtime_version,
+            runtime_revision,
+            runtime_url,
+            runtime_sha256,
+            runtime_root )
+        with
+        | Some release, false, None, None, None, None, None ->
+            run_init_release (Version release) source_repository options
+        | None, true, None, None, None, None, None ->
+            run_init_release Latest source_repository options
+        | None, false, Some runtime_version, Some runtime_revision,
+          Some runtime_url, Some runtime_sha256, runtime_root ->
+            Clamp.Initializer.create ~target:options.repo_root ~source_repository
+              ~runtime_version ~runtime_revision ~runtime_url ~runtime_sha256
+              ?runtime_root ()
+            |> emit_init options
+        | _ -> selection_error options)
+      $ source_repository $ selected_release $ latest $ runtime_version
+      $ runtime_revision $ runtime_url $ runtime_sha256 $ runtime_root
+      $ common_options)
 
 let placeholder_term command operands =
   Term.(const (fun _ options -> run_placeholder command options) $ operands $ common_options)
@@ -765,7 +844,7 @@ let inspect_fallback_argv argv =
       "--closure-authority"; "--verification-authority"; "--local-database";
       "--migrations-dir"; "--source-repository"; "--runtime-version";
       "--runtime-revision"; "--runtime-url"; "--runtime-sha256";
-      "--runtime-root"; "--commit"; "--thread-id"; "--version" ]
+      "--runtime-root"; "--release"; "--commit"; "--thread-id"; "--version" ]
   in
   let boolean_options =
     [ "--json"; "--quiet"; "-q"; "--diagnostic"; "--stdin";

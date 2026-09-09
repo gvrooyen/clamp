@@ -161,6 +161,27 @@ let canonical_config source_repository =
     "schema_version: 1\nsource_repository: %s\ntimezone: Africa/Johannesburg\ninferred_writes: confirm\nembedding:\n  provider: openrouter\n  base_url: https://openrouter.ai/api/v1\n  model: openai/text-embedding-3-small\n  dimensions: 1536\n  max_input_bytes: 8000\n  provider_order: [openai]\n  allow_fallbacks: false\n  data_collection: deny\nretrieval:\n  candidate_limit: 100\n  result_limit: 10\n  semantic_weight: 0.70\n  recency_weight: 0.20\n  frequency_weight: 0.10\n  recency_half_life_days: 30\n  frequency_saturation_count: 100\n"
     source_repository
 
+let preflight ~target ~source_repository =
+  if not (Config.valid_source_repository source_repository) then
+    error "source_repository_invalid" "The source repository identity is invalid."
+  else
+    let target =
+      if Filename.is_relative target then Filename.concat (Sys.getcwd ()) target
+      else target
+    in
+    let parent = Filename.dirname target and name = Filename.basename target in
+    if not (Secure_fs.valid_component name) then
+      error "init_path_invalid" "The repository path must end in one portable component."
+    else if Sys.file_exists target then
+      error "init_target_exists" "The initialization target already exists."
+    else
+      try
+        let descriptor = Secure_fs.open_directory parent in
+        Unix.close descriptor;
+        Ok ()
+      with _ ->
+        error "init_parent_invalid" "The repository parent is not a safe directory."
+
 let create ~target ~source_repository ~runtime_version ~runtime_revision
     ~runtime_url ~runtime_sha256 ?runtime_root:root () =
   if not (Config.valid_source_repository source_repository) then

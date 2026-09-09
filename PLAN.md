@@ -8,8 +8,8 @@ implementation order, verification gates, and rollout discipline. If work
 uncovers a product ambiguity, stop at the relevant phase gate and update the
 PRD deliberately rather than hiding a decision in code.
 
-Clamp v1 and Phases 0–9 are implemented. Version 0.1.2 is the latest published
-production release; current source targets 0.1.3.
+Clamp v1 and Phases 0–9 are implemented. Version 0.1.3 is the latest published
+production release; current source targets 0.1.4.
 Repository-owned acceptance remains local-only; production deployment and
 release-tag publication are operator-controlled gates.
 
@@ -125,8 +125,8 @@ conventions before implementing product behavior.
 
 ## Production release build
 
-**Status:** implemented for version 0.1.3. Publishing the `v0.1.3` tag and
-GitHub release remains an operator-controlled external action.
+**Status:** implemented and published for version 0.1.3. Future tags and GitHub
+releases remain operator-controlled external actions.
 
 ### Deliverables
 
@@ -670,7 +670,7 @@ unrelated work, history, or unresolved knowledge.
   the rebase so the original commit is intact and preserve that commit on
   `conflicts/<thread-id>/<UTC timestamp>`.
 - For a genuine unresolved conflict, return the conflict branch, original
-  commit SHA, and paths without knowledge bodies. The skill—not the CLI—uses
+  commit SHA, and paths without knowledge bodies. The skill–not the CLI–uses
   Amp owner-email capability for that notification.
 - After a successful push, sync the exact pushed SHA. If sync fails, report a
   stale index but never revert or rewrite the successful Git publication.
@@ -827,6 +827,10 @@ the reusable source baseline.
 - Provide `kb init` to create a complete local private knowledge repository on
   `main` with one clean generic initial commit, without implementation source,
   a remote, a push, production access, or paid requests.
+- Let `kb init --release X.Y.Z` and `kb init --latest` derive the exact runtime
+  lock from a checksum-verified public package and use that package's own
+  templates. Preserve all four explicit pin options for offline and controlled
+  test initialization.
 - Have generated Orb setup verify and install the runtime outside the private
   repository, apply bundled migrations only to disposable local PostgreSQL,
   and atomically retain the previous executable if installation fails.

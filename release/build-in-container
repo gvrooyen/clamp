@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root=/tmp/clamp-source
 opam_version=2.5.2
 opam_sha256=edfca2630c373b44b7ee1c2f81cd8dcf67468d0db57d6c02158de553ac63dbd4
 opam_repository_commit=145fce2b2140de3353bafb4039fa64a2fd405ce5
@@ -9,13 +10,13 @@ snapshot=20260824T000000Z
 
 cat >/etc/apt/sources.list.d/debian.sources <<EOF
 Types: deb
-URIs: https://snapshot.debian.org/archive/debian/$snapshot
+URIs: http://snapshot.debian.org/archive/debian/$snapshot
 Suites: bookworm bookworm-updates
 Components: main
 Check-Valid-Until: no
 
 Types: deb
-URIs: https://snapshot.debian.org/archive/debian-security/$snapshot
+URIs: http://snapshot.debian.org/archive/debian-security/$snapshot
 Suites: bookworm-security
 Components: main
 Check-Valid-Until: no
@@ -27,11 +28,12 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   libpq-dev libyaml-dev m4 pkg-config unzip
 rm -rf /var/lib/apt/lists/*
 
+mkdir -p /root/.local/bin
 curl --fail --silent --show-error --location \
   "https://github.com/ocaml/opam/releases/download/$opam_version/opam-$opam_version-x86_64-linux" \
-  --output /usr/local/bin/opam
-printf '%s  %s\n' "$opam_sha256" /usr/local/bin/opam | sha256sum --check --status
-chmod 0755 /usr/local/bin/opam
+  --output /root/.local/bin/opam
+printf '%s  %s\n' "$opam_sha256" /root/.local/bin/opam | sha256sum --check --status
+chmod 0755 /root/.local/bin/opam
 
 git init --quiet /tmp/opam-repository
 git -C /tmp/opam-repository remote add origin https://github.com/ocaml/opam-repository.git
@@ -39,9 +41,20 @@ git -C /tmp/opam-repository fetch --quiet --depth=1 origin "$opam_repository_com
 git -C /tmp/opam-repository checkout --quiet FETCH_HEAD
 [[ "$(git -C /tmp/opam-repository rev-parse HEAD)" == "$opam_repository_commit" ]]
 
-export OPAMROOT=/tmp/opam-root OPAMYES=1 OPAMCOLOR=never
-opam init --bare --no-setup --disable-sandboxing --yes default /tmp/opam-repository
+export OPAMROOT=/root/.local/share/clamp/opam OPAMYES=1 OPAMCOLOR=never
+export PATH="/root/.local/bin:$PATH"
+/root/.local/bin/opam init --bare --no-setup --disable-sandboxing --yes default \
+  /tmp/opam-repository
+source_revision="$(git -c safe.directory="$source_root" -C "$source_root" rev-parse HEAD)"
+git clone --quiet --no-local \
+  --upload-pack="git -c safe.directory=$source_root/.git upload-pack" \
+  "$source_root" "$repo_root"
+[[ "$(git -C "$repo_root" rev-parse HEAD)" == "$source_revision" ]]
 cd "$repo_root"
-opam switch create . "ocaml-base-compiler.$(tr -d '[:space:]' < .ocaml-version)" \
+/root/.local/bin/opam switch create . \
+  "ocaml-base-compiler.$(tr -d '[:space:]' < .ocaml-version)" \
   --no-install --yes
 release/build
+mkdir -p "$source_root/dist"
+cp dist/clamp-*-linux-x86_64.tar.gz dist/clamp-*-linux-x86_64.tar.gz.sha256 \
+  "$source_root/dist/"

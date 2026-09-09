@@ -68,10 +68,10 @@ does not fetch.
 On sync failure, use local fallback only when structured `details` contain
 `"fallback":"local_markdown_or_rg"` and
 `"semantic_equivalent":false`. The CLI adds this classification to every sync
-authentication/transient result—including database authentication/timeouts and
+authentication/transient result–including database authentication/timeouts and
 connection loss, OpenRouter authentication/network/timeout/rate/payment/service
 failures, Git authentication/configuration/timeout/unavailable/target failures,
-and sync-lock contention—and to the missing direct-URL precondition. The
+and sync-lock contention–and to the missing direct-URL precondition. The
 production Sync boundary owns the authoritative fallback-eligible code/kind
 list, and repository tests require the fixture to match that list exactly.
 Consuming the structured classification is safer than duplicating the list in

@@ -239,6 +239,10 @@ let successful_help arguments =
 
 let documentation_and_cli_contract_drift () =
   let readme = read (path "README.md")
+  and cli_guide = read (path "docs/cli.md")
+  and amp_guide = read (path "docs/amp.md")
+  and recovery_guide = read (path "docs/recovery.md")
+  and development_guide = read (path "docs/development.md")
   and plan = read (path "PLAN.md")
   and prd = read (path "PRD.md")
   and agents = read (path "AGENTS.md")
@@ -249,7 +253,7 @@ let documentation_and_cli_contract_drift () =
   in
   List.iter
     (fun (scope, command) ->
-      check_contains ("README command " ^ command) readme command;
+      check_contains ("CLI guide command " ^ command) cli_guide command;
       if
         not
           (List.mem command
@@ -280,13 +284,17 @@ let documentation_and_cli_contract_drift () =
       ( successful_help [ "config"; "set"; "--help=plain" ],
         "kb config set inferred-writes" ) ];
   List.iter
-    (fun fragment ->
-      check_contains ("README contract " ^ fragment) readme fragment;
+    (fun (document, name, fragment) ->
+      check_contains (name ^ " contract " ^ fragment) document fragment;
       check_contains ("skill contract " ^ fragment) skill fragment)
-    [ "stable JSON"; "local_markdown_or_rg"; "semantic_equivalent";
-      "performed-and-verified"; "publish_complete_index_stale";
-      "publish_race_exhausted"; "publish_conflict_preserved" ];
-  check_contains "README local acceptance command" readme
+    [ (cli_guide, "CLI guide", "stable JSON");
+      (amp_guide, "Amp guide", "local_markdown_or_rg");
+      (cli_guide, "CLI guide", "semantic_equivalent");
+      (amp_guide, "Amp guide", "performed-and-verified");
+      (recovery_guide, "recovery guide", "publish_complete_index_stale");
+      (recovery_guide, "recovery guide", "publish_race_exhausted");
+      (recovery_guide, "recovery guide", "publish_conflict_preserved") ];
+  check_contains "development guide local acceptance command" development_guide
     ".agents/phase9-acceptance";
   check_contains "skill local acceptance boundary" skill
     ".agents/phase9-acceptance";
@@ -305,10 +313,9 @@ let documentation_and_cli_contract_drift () =
     [ "reviewed Phase 7 CLI compatibility check, final";
       "external compatibility, clean-room";
       "leaves it pending"; "external gates remain" ];
-  check_contains "README records public implementation status" readme
-    "Clamp v1 and Phases 0–9 are implemented";
-  check_contains "README marks production operator-controlled" readme
-    "no production authority";
+  check_contains "README records current release" readme "v0.1.3";
+  check_contains "operations guide marks production operator-controlled"
+    (read (path "docs/operations.md")) "no production authority";
   check_absent "PLAN has no pending matrix disposition" plan "**Pending:**"
 
 let write_executable file body =

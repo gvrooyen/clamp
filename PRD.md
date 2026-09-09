@@ -2,8 +2,8 @@
 
 ## Status
 
-Clamp v1 and Phases 0–9 are implemented. Version 0.1.2 is the latest published
-production release; current source targets 0.1.3. The blocking product and
+Clamp v1 and Phases 0–9 are implemented. Version 0.1.3 is the latest published
+production release; current source targets 0.1.4. The blocking product and
 architecture decisions are resolved; retrieval coefficients remain tunable
 operational defaults rather than product invariants. Repository-owned
 acceptance is local-only; production deployment and release-tag publication
@@ -96,7 +96,7 @@ telemetry, but telemetry loss is an accepted v1 failure mode.
 
 ## Production distribution
 
-The 0.1.2 release provides a stripped native Linux x86_64 `kb` executable,
+The 0.1.3 release provides a stripped native Linux x86_64 `kb` executable,
 bundles its non-system shared-library closure, and carries the authoritative
 migrations and source-free private-repository templates. A fresh Amp Orb with
 glibc 2.36 or newer must run `kb --version`, `kb --json --help`, and `kb init`
@@ -131,6 +131,16 @@ V1 requires base-system `/usr/bin/tar` but no external curl executable, OCaml,
 opam, libpq, or libcurl installation.
 Versions through 0.1.2 require one manual bootstrap installation because they
 predate the command.
+
+Initialization accepts exactly one runtime selection. `--release X.Y.Z`
+selects an exact stable public release, `--latest` selects GitHub's latest
+stable release, and the four explicit runtime pin options preserve the offline
+and controlled-test path. The release shortcuts download the fixed public
+archive and adjacent checksum, apply the self-upgrader's HTTPS, response-size,
+checksum, archive-layout, and extracted-size checks, verify the archive's
+version and revision markers and executable, and copy templates from that
+selected archive. They record the same exact four-field runtime lock as the
+explicit form. Local request validation happens before a release download.
 
 ## Repository layout
 
@@ -169,17 +179,17 @@ example, `knowledge/projects/clamp.md` has concept ID `projects/clamp`.
 
 Clamp uses these standard fields with their OKF semantics:
 
-- `type` — required, non-empty concept category.
-- `title`, `description`, `tags` — optional descriptive metadata.
-- `generated: { by, at }` — who produced the current document content and
+- `type` – required, non-empty concept category.
+- `title`, `description`, `tags` – optional descriptive metadata.
+- `generated: { by, at }` – who produced the current document content and
   when it last changed meaningfully. It does **not** identify who originally
   asserted the claim.
-- `verified: [ { by, at } ]` — independent confirmation events. Clamp always
+- `verified: [ { by, at } ]` – independent confirmation events. Clamp always
   writes list form even though OKF consumers also accept a single mapping.
-- `status` — `draft`, `stable`, or `deprecated`; omission means `stable`.
-- `stale_after` — absolute `YYYY-MM-DD` date. A concept is stale when the
+- `status` – `draft`, `stable`, or `deprecated`; omission means `stable`.
+- `stale_after` – absolute `YYYY-MM-DD` date. A concept is stale when the
   current date in `Africa/Johannesburg` is greater than or equal to this date.
-- `sources` — optional source mappings. Every entry has a `resource`; other
+- `sources` – optional source mappings. Every entry has a `resource`; other
   OKF credibility fields may also be present.
 
 `generated.by` is the configured human authority only when the user literally
@@ -293,9 +303,9 @@ indexed OKF concepts, not reserved log documents.
 
 The repository-level `inferred_writes` setting controls inferred knowledge:
 
-- `confirm` — the default. The skill asks the user before persisting an
+- `confirm` – the default. The skill asks the user before persisting an
   agent-inferred fact or inferred task.
-- `auto_draft` — the agent may persist an inference without asking. The
+- `auto_draft` – the agent may persist an inference without asking. The
   newly created concept uses `status: draft`, `clamp.asserted_by: amp/agent`,
   and no human verification entry. Editing an existing concept preserves its
   stored lifecycle status exactly. Semantic edits clear stale verification;
@@ -475,20 +485,21 @@ service.
 
 The CLI provides at least:
 
-- `kb init` — create a source-free private knowledge repository from a pinned
-  Linux x86-64 runtime release, without creating or pushing a remote.
-- `kb search <query>` — semantic search returning metadata and snippets.
-- `kb get <concept-id>` — return full concept content and record an access.
-- `kb add`, `kb edit`, `kb verify`, `kb deprecate` — concept mutations.
-- `kb task add|list|start|block|done|cancel` — task lifecycle operations.
-- `kb todo` — regenerate or print the TODO view.
-- `kb validate` — validate bundle, links, extensions, and generated files.
-- `kb sync` — synchronize the remote default branch into Postgres.
-- `kb publish` — validate, commit managed knowledge changes, rebase, push, and
+- `kb init` – create a source-free private knowledge repository from an exact
+  or latest stable Linux x86-64 runtime release, or from four explicit runtime
+  pins, without creating or pushing a remote.
+- `kb search <query>` – semantic search returning metadata and snippets.
+- `kb get <concept-id>` – return full concept content and record an access.
+- `kb add`, `kb edit`, `kb verify`, `kb deprecate` – concept mutations.
+- `kb task add|list|start|block|done|cancel` – task lifecycle operations.
+- `kb todo` – regenerate or print the TODO view.
+- `kb validate` – validate bundle, links, extensions, and generated files.
+- `kb sync` – synchronize the remote default branch into Postgres.
+- `kb publish` – validate, commit managed knowledge changes, rebase, push, and
   invoke sync for the pushed commit.
-- `kb upgrade <--version X.Y.Z|--latest>` — replace a packaged CLI release
+- `kb upgrade <--version X.Y.Z|--latest>` – replace a packaged CLI release
   independently of any knowledge repository.
-- `kb config set inferred-writes <confirm|auto_draft>` — change the inference
+- `kb config set inferred-writes <confirm|auto_draft>` – change the inference
   policy after an explicit user instruction.
 
 Commands offer machine-readable `--json` output so the skill can distinguish
@@ -497,16 +508,22 @@ parsing prose.
 
 The public distribution also provides a Linux x86-64 runtime archive containing
 only the native executable, authoritative migrations, private-repository
-templates, license, and exact version/revision markers. `kb init` copies those
-templates into a newly initialized private Git repository and records a
-four-field runtime lock (version, revision, HTTPS release URL, and SHA-256).
+templates, license, and exact version/revision markers. `kb init --release`
+and `kb init --latest` securely resolve and verify a public archive, copy that
+archive's templates into a newly initialized private Git repository, and
+record a four-field runtime lock (version, revision, HTTPS release URL, and
+SHA-256). The explicit four-pin form copies templates from its supplied runtime
+root and performs no network request.
 Initialization records all durable generated files in a hook-free initial
 commit under a generic local-only author identity. Empty taxonomy directories
 are recreated by setup because Git does not track directories. The generated
 setup verifies and installs that exact archive outside the private repository;
 it never checks out or builds the implementation source.
 V1 does not create a remote, push, migrate production, synchronize production,
-or make an embedding request during initialization or setup.
+or make an embedding request during initialization or setup. Release-selection
+shortcuts make read-only requests only to the fixed public Clamp GitHub release
+source; explicit-pin initialization and generated setup perform no release
+metadata lookup.
 
 The repo-local `managing-clamp-knowledge` Amp skill instructs an agent to:
 
@@ -749,8 +766,8 @@ One concept produces one embedding. The deterministic embedding input is:
 4. `tags`;
 5. Markdown body.
 
-Volatile or filtering metadata—such as `generated.at`, `verified`, task state,
-priority, and access telemetry—is excluded. Consequently, confirming a fact or
+Volatile or filtering metadata–such as `generated.at`, `verified`, task state,
+priority, and access telemetry–is excluded. Consequently, confirming a fact or
 closing a task updates indexed metadata without paying to re-embed unchanged
 semantic content.
 
@@ -1057,10 +1074,10 @@ External services are fixed for v1:
 
 Required Amp project secrets:
 
-- `KB_DATABASE_URL` — Neon pooled connection string for searches.
-- `KB_DATABASE_DIRECT_URL` — Neon direct connection string for migrations and
+- `KB_DATABASE_URL` – Neon pooled connection string for searches.
+- `KB_DATABASE_DIRECT_URL` – Neon direct connection string for migrations and
   synchronization.
-- `OPENROUTER_API_KEY` — credit-limited OpenRouter API key for document and
+- `OPENROUTER_API_KEY` – credit-limited OpenRouter API key for document and
   query embeddings.
 
 Manual Neon provisioning does not require a Neon account API key at runtime.

@@ -15,7 +15,16 @@ type success = {
   changed : bool;
 }
 
+type release = {
+  version : string;
+  revision : string;
+  url : string;
+  sha256 : string;
+  runtime_root : string;
+}
+
 val run : current_version:string -> request -> (success, error) result
+val with_release : request -> (release -> 'a) -> ('a, error) result
 val exit_class : error -> Exit_class.t
 
 module For_test : sig
@@ -31,4 +40,11 @@ module For_test : sig
     archive:string ->
     checksum:string ->
     (success, error) result
+
+  val with_release_archive :
+    version:string ->
+    archive:string ->
+    checksum:string ->
+    (release -> 'a) ->
+    ('a, error) result
 end

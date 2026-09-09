@@ -37,6 +37,8 @@ let with_directory action =
   Unix.mkdir root 0o700;
   Fun.protect ~finally:(fun () -> remove root) (fun () -> action root)
 
+let fixture_revision = "0123456789abcdef0123456789abcdef01234567"
+
 let release_layout root version =
   Unix.mkdir root 0o755;
   Unix.mkdir (Filename.concat root "bin") 0o755;
@@ -47,7 +49,9 @@ let release_layout root version =
        version);
   write (Filename.concat root "README.txt") "release\n";
   write (Filename.concat root "LICENSE") "license\n";
-  write (Filename.concat root "THIRD_PARTY_NOTICES") "notices\n"
+  write (Filename.concat root "THIRD_PARTY_NOTICES") "notices\n";
+  write (Filename.concat root "VERSION") (version ^ "\n");
+  write (Filename.concat root "REVISION") (fixture_revision ^ "\n")
 
 let version_contract () =
   let valid = Clamp.Upgrade.For_test.valid_version in
@@ -84,6 +88,61 @@ let checksum_contract () =
            (Clamp.Upgrade.For_test.checksum ~version:"1.2.3" contents)))
     [ digest ^ "  other.tar.gz\n"; String.make 64 'A' ^ "  clamp-1.2.3-linux-x86_64.tar.gz\n";
       digest ^ " *clamp-1.2.3-linux-x86_64.tar.gz\n"; contents ^ "extra\n" ]
+
+let resolved_release_archive () =
+  with_directory (fun parent ->
+      let source = Filename.concat parent "source" in
+      Unix.mkdir source 0o700;
+      let archive_root = "clamp-1.2.3-linux-x86_64" in
+      release_layout (Filename.concat source archive_root) "1.2.3";
+      let archive_path = Filename.concat parent (archive_root ^ ".tar.gz") in
+      let command =
+        Printf.sprintf "/usr/bin/tar -C %s -czf %s %s"
+          (Filename.quote source) (Filename.quote archive_path)
+          (Filename.quote archive_root)
+      in
+      Alcotest.(check int) "fixture archive" 0 (Sys.command command);
+      let archive = read archive_path in
+      let digest = Digestif.SHA256.(to_hex (digest_string archive)) in
+      let checksum = digest ^ "  " ^ archive_root ^ ".tar.gz\n" in
+      let extracted = ref "" in
+      let resolved =
+        get_ok
+          (Clamp.Upgrade.For_test.with_release_archive ~version:"1.2.3"
+             ~archive ~checksum (fun (release : Clamp.Upgrade.release) ->
+               extracted := release.runtime_root;
+               Alcotest.(check bool) "runtime available to callback" true
+                 (Sys.file_exists
+                    (Filename.concat release.runtime_root "bin/kb"));
+               release))
+      in
+      Alcotest.(check string) "release version" "1.2.3" resolved.version;
+      Alcotest.(check string) "release revision" fixture_revision
+        resolved.revision;
+      Alcotest.(check string) "release SHA-256" digest resolved.sha256;
+      Alcotest.(check string) "release URL"
+        "https://github.com/gvrooyen/clamp/releases/download/v1.2.3/clamp-1.2.3-linux-x86_64.tar.gz"
+        resolved.url;
+      Alcotest.(check bool) "temporary runtime cleaned" false
+        (Sys.file_exists !extracted);
+      write (Filename.concat source (archive_root ^ "/REVISION"))
+        "not-a-revision\n";
+      Alcotest.(check int) "invalid marker archive" 0 (Sys.command command);
+      let invalid_archive = read archive_path in
+      let invalid_digest =
+        Digestif.SHA256.(to_hex (digest_string invalid_archive))
+      in
+      let invalid_checksum =
+        invalid_digest ^ "  " ^ archive_root ^ ".tar.gz\n"
+      in
+      let invalid =
+        Clamp.Upgrade.For_test.with_release_archive ~version:"1.2.3"
+          ~archive:invalid_archive ~checksum:invalid_checksum Fun.id
+      in
+      Alcotest.(check string) "invalid marker code" "upgrade_archive_invalid"
+        (match invalid with
+        | Error error -> error.code
+        | Ok _ -> Alcotest.fail "invalid revision marker accepted"))
 
 let atomic_install () =
   with_directory (fun parent ->
@@ -157,4 +216,6 @@ let () =
     [ ( "upgrade",
         [ Alcotest.test_case "version and latest contract" `Quick version_contract;
           Alcotest.test_case "checksum contract" `Quick checksum_contract;
+          Alcotest.test_case "verified release metadata" `Quick
+            resolved_release_archive;
           Alcotest.test_case "verified atomic installation" `Quick atomic_install ] ) ]
