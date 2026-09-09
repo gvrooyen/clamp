@@ -2,7 +2,7 @@
 
 ## Status
 
-Clamp v1, Phases 0–9, and the pinned 0.1.1 production-release build are
+Clamp v1, Phases 0–9, and the pinned 0.1.2 production-release build are
 implemented. The blocking product and architecture decisions are resolved;
 retrieval coefficients remain tunable operational defaults rather than product
 invariants. Repository-owned acceptance is local-only; production deployment
@@ -95,7 +95,7 @@ telemetry, but telemetry loss is an accepted v1 failure mode.
 
 ## Production distribution
 
-The 0.1.1 release provides a stripped native Linux x86_64 `kb` executable,
+The 0.1.2 release provides a stripped native Linux x86_64 `kb` executable,
 bundles its non-system shared-library closure, and carries the authoritative
 migrations and source-free private-repository templates. A fresh Amp Orb with
 glibc 2.36 or newer must run `kb --version`, `kb --json --help`, and `kb init`
@@ -478,8 +478,11 @@ only the native executable, authoritative migrations, private-repository
 templates, license, and exact version/revision markers. `kb init` copies those
 templates into a newly initialized private Git repository and records a
 four-field runtime lock (version, revision, HTTPS release URL, and SHA-256).
-The generated setup verifies and installs that exact archive outside the
-private repository; it never checks out or builds the implementation source.
+Initialization records all durable generated files in a hook-free initial
+commit under a generic local-only author identity. Empty taxonomy directories
+are recreated by setup because Git does not track directories. The generated
+setup verifies and installs that exact archive outside the private repository;
+it never checks out or builds the implementation source.
 V1 does not create a remote, push, migrate production, synchronize production,
 or make an embedding request during initialization or setup.
 

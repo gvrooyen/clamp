@@ -118,24 +118,43 @@ let runtime_root = function
 let template root relative =
   read_regular (Filename.concat root ("share/clamp/templates/" ^ relative))
 
-let git_init path =
-  let argv =
-    [| "/usr/bin/git"; "init"; "--quiet"; "--template=";
-       "--object-format=sha1"; "--initial-branch=main"; path |]
-  and environment =
+let git_environment =
     [| "GIT_CONFIG_NOSYSTEM=1"; "GIT_CONFIG_GLOBAL=/dev/null";
        "HOME=/nonexistent"; "XDG_CONFIG_HOME=/nonexistent";
-       "LANG=C"; "LC_ALL=C" |]
-  in
+       "LANG=C"; "LC_ALL=C";
+       "GIT_AUTHOR_NAME=Clamp Initializer";
+       "GIT_AUTHOR_EMAIL=clamp@local.invalid";
+       "GIT_COMMITTER_NAME=Clamp Initializer";
+       "GIT_COMMITTER_EMAIL=clamp@local.invalid" |]
+
+let run_git path arguments code message =
+  let argv = Array.of_list ("/usr/bin/git" :: "-C" :: path :: arguments) in
   try
     let pid =
-      Unix.create_process_env "/usr/bin/git" argv environment Unix.stdin
+      Unix.create_process_env "/usr/bin/git" argv git_environment Unix.stdin
         Unix.stdout Unix.stderr
     in
     match snd (Unix.waitpid [] pid) with
     | Unix.WEXITED 0 -> Ok ()
-    | _ -> error "git_init_failed" "Git could not initialize the private repository."
+    | _ -> error code message
   with _ -> error "git_unavailable" "Git is required to initialize the private repository."
+
+let git_init path =
+  run_git path
+    [ "init"; "--quiet"; "--template="; "--object-format=sha1";
+      "--initial-branch=main" ]
+    "git_init_failed" "Git could not initialize the private repository."
+
+let git_commit path =
+  Result.bind
+    (run_git path [ "add"; "--all" ] "git_add_failed"
+       "Git could not stage the initialized private repository.")
+    (fun () ->
+      run_git path
+        [ "commit"; "--quiet"; "--no-gpg-sign"; "--no-verify";
+          "--message=Initialize Clamp knowledge repository" ]
+        "git_commit_failed"
+        "Git could not commit the initialized private repository.")
 
 let canonical_config source_repository =
   Printf.sprintf
@@ -221,6 +240,9 @@ let create ~target ~source_repository ~runtime_version ~runtime_revision
                         if List.exists Diagnostic.is_error validation.diagnostics then
                           raise (Failure "generated repository did not validate"));
                     (match git_init staged with
+                    | Error issue -> raise (Failure issue.message)
+                    | Ok () -> ());
+                    (match git_commit staged with
                     | Error issue -> raise (Failure issue.message)
                     | Ok () -> ());
                     Secure_fs.rename_noreplace parent_descriptor temporary

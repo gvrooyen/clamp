@@ -11,6 +11,10 @@ Fresh Amp Orbs run `.agents/setup` once and `.agents/resume` after every wake.
 Neither hook performs production synchronization, publication, migration, or
 paid embedding requests.
 
+`kb init` records the durable bootstrap files in a generic initial commit but
+does not configure a remote. Setup recreates empty taxonomy directories because
+Git does not track empty directories.
+
 Validate locally with:
 
 ```bash

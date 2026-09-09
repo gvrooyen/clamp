@@ -464,6 +464,10 @@ check_project_secrets() {
   fi
 }
 
+ensure_bundle_directories() {
+  mkdir -p "$repo_root/knowledge"/{facts,preferences,people,projects,decisions,journal,tasks}
+}
+
 verify_clean_login_shell() {
   log 'verifying the persisted runtime in a clean login shell'
   touch "$HOME/.bash_profile"
@@ -491,6 +495,7 @@ EOF
 
 main() {
   load_runtime_lock
+  run_stage 'knowledge directory check' ensure_bundle_directories
   run_stage 'system package check/install' install_system_packages
   run_stage 'pinned runtime installation' install_runtime
   validate_trusted_0001

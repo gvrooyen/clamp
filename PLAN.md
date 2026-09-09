@@ -8,7 +8,7 @@ implementation order, verification gates, and rollout discipline. If work
 uncovers a product ambiguity, stop at the relevant phase gate and update the
 PRD deliberately rather than hiding a decision in code.
 
-Clamp v1, Phases 0–9, and the pinned 0.1.1 production-release build are
+Clamp v1, Phases 0–9, and the pinned 0.1.2 production-release build are
 implemented. Repository-owned acceptance remains local-only; production
 deployment and release-tag publication are operator-controlled gates.
 
@@ -124,7 +124,7 @@ conventions before implementing product behavior.
 
 ## Production release build
 
-**Status:** implemented for version 0.1.1. Publishing the `v0.1.1` tag and
+**Status:** implemented for version 0.1.2. Publishing the `v0.1.2` tag and
 GitHub release remains an operator-controlled external action.
 
 ### Deliverables
@@ -815,14 +815,15 @@ the reusable source baseline.
 - Publish its SHA-256 beside the archive and require generated private
   repositories to pin version, revision, HTTPS URL, and digest.
 - Provide `kb init` to create a complete local private knowledge repository on
-  `main` without implementation source, a remote, a push, production access,
-  or paid requests.
+  `main` with one clean generic initial commit, without implementation source,
+  a remote, a push, production access, or paid requests.
 - Have generated Orb setup verify and install the runtime outside the private
   repository, apply bundled migrations only to disposable local PostgreSQL,
   and atomically retain the previous executable if installation fails.
 - Acceptance requires a fresh No Project Amp Orb to initialize the private
   repository, run setup twice and resume once, validate the empty bundle, and
-  confirm no implementation tree or remote was introduced.
+  confirm a clean tracked initial tree and that no implementation tree or
+  remote was introduced.
 
 ### Final rollout sequence
 

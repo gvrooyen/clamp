@@ -4,7 +4,7 @@ Clamp is a personal, agent-managed knowledge base for Amp Orbs. It keeps durable
 knowledge and tasks as human-readable, Git-versioned Markdown while using Neon
 Postgres and pgvector for fast semantic retrieval.
 
-> **Status:** Clamp v1 and Phases 0–9 are implemented. The pinned 0.1.1
+> **Status:** Clamp v1 and Phases 0–9 are implemented. The pinned 0.1.2
 > production-release build is also implemented. Repository-owned acceptance is
 > local-only and does not authorize production database or publication
 > operations.
@@ -132,8 +132,10 @@ the release archive SHA-256, run its
 `bin/kb init` command as shown above. Initialization creates a local private Git
 repository on `main` with `clamp.yaml`, an empty valid knowledge taxonomy,
 deterministic `TODO.md`, the knowledge-management skill, Orb lifecycle hooks,
-and `.agents/clamp-runtime.lock`. It does not create a remote or perform any
-network, production database, publication, sync, or embedding operation.
+and `.agents/clamp-runtime.lock`. It records those durable files in one clean
+initial commit under the generic `Clamp Initializer <clamp@local.invalid>`
+identity. It does not create a remote or perform any network, production
+database, publication, sync, or embedding operation.
 
 The generated `.agents/setup` downloads and verifies only the pinned runtime,
 installs it under `$HOME/.local/share/clamp/kb/<revision>`, atomically activates
@@ -850,7 +852,7 @@ Environment setup and local acceptance are documented above. During review:
 
 ## Production release
 
-Version 0.1.1 is distributed as `clamp-0.1.1-linux-x86_64.tar.gz`. The archive
+Version 0.1.2 is distributed as `clamp-0.1.2-linux-x86_64.tar.gz`. The archive
 contains a stripped native `bin/kb`, its non-system shared libraries,
 authoritative migrations, and private-repository templates. It
 requires only an x86_64 Linux environment with glibc 2.36 or newer; a fresh Orb
@@ -859,9 +861,9 @@ does not need OCaml, opam, libpq, or libcurl installed to run it.
 After downloading the archive and its `.sha256` file from the GitHub release:
 
 ```bash
-sha256sum --check clamp-0.1.1-linux-x86_64.tar.gz.sha256
-tar -xzf clamp-0.1.1-linux-x86_64.tar.gz
-./clamp-0.1.1-linux-x86_64/bin/kb --version
+sha256sum --check clamp-0.1.2-linux-x86_64.tar.gz.sha256
+tar -xzf clamp-0.1.2-linux-x86_64.tar.gz
+./clamp-0.1.2-linux-x86_64/bin/kb --version
 ```
 
 The binary operates on a Clamp checkout. Run it from the checkout or pass

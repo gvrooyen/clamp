@@ -3,17 +3,18 @@ Top-level metadata is available without executing product behavior.
   $ unset KB_DATABASE_URL KB_DATABASE_DIRECT_URL OPENROUTER_API_KEY
   $ repo="$PWD/fixture"; mkdir -p "$repo/knowledge"; cp -L ../../clamp.yaml "$repo/"; kb --repo "$repo" todo --quiet
   $ kb --version
-  0.1.1
+  0.1.2
 
 Initialization creates a complete source-free private repository without
 network or production operations.
 
   $ runtime_root="$PWD/runtime-root"; mkdir -p "$runtime_root/share/clamp"; cp -LR ../../runtime/templates "$runtime_root/share/clamp/"
-  $ private="$PWD/private"; kb init --repo "$private" --source-repository example.invalid/owner/private-clamp --runtime-version 0.1.1 --runtime-revision 0123456789abcdef0123456789abcdef01234567 --runtime-url https://example.invalid/clamp-0.1.1-linux-x86_64.tar.gz --runtime-sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --runtime-root "$runtime_root" --json | sed "s#${private}#PRIVATE#"
+  $ private="$PWD/private"; kb init --repo "$private" --source-repository example.invalid/owner/private-clamp --runtime-version 0.1.2 --runtime-revision 0123456789abcdef0123456789abcdef01234567 --runtime-url https://example.invalid/clamp-0.1.2-linux-x86_64.tar.gz --runtime-sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --runtime-root "$runtime_root" --json | sed "s#${private}#PRIVATE#"
   {"ok":true,"code":"repository_initialized","data":{"path":"PRIVATE","source_repository":"example.invalid/owner/private-clamp","runtime_revision":"0123456789abcdef0123456789abcdef01234567"}}
-  $ git -C "$private" branch --show-current; git -C "$private" remote | wc -l
+  $ git -C "$private" branch --show-current; git -C "$private" remote | wc -l; git -C "$private" rev-list --count HEAD; test -z "$(git -C "$private" status --porcelain)"
   main
   0
+  1
   $ test ! -e "$private/bin" && test ! -e "$private/lib" && test ! -e "$private/test" && test ! -e "$private/db"
   $ kb validate --repo "$private" --json
   {"ok":true,"code":"bundle_valid","data":{"concepts":0,"reserved_documents":0,"diagnostics":[]}}

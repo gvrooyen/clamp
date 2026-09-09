@@ -34,10 +34,10 @@ let check_ok = function
 let create root target =
   Clamp.Initializer.create ~target
     ~source_repository:"example.invalid/owner/private-clamp"
-    ~runtime_version:"0.1.1"
+    ~runtime_version:"0.1.2"
     ~runtime_revision:"0123456789abcdef0123456789abcdef01234567"
     ~runtime_url:
-      "https://github.com/gvrooyen/clamp/releases/download/v0.1.1/clamp-0.1.1-linux-x86_64.tar.gz"
+      "https://github.com/gvrooyen/clamp/releases/download/v0.1.2/clamp-0.1.2-linux-x86_64.tar.gz"
     ~runtime_sha256:(String.make 64 'a') ~runtime_root:root ()
 
 let complete_private_repository () =
@@ -56,6 +56,24 @@ let complete_private_repository () =
         (read (Filename.concat target ".git/HEAD"));
       Alcotest.(check bool) "no inherited Git hooks" false
         (Sys.file_exists (Filename.concat target ".git/hooks"));
+      Alcotest.(check int) "one initial commit" 0
+        (Sys.command
+           (Printf.sprintf
+              "test \"$(git -C %s rev-list --count HEAD)\" = 1"
+              (Filename.quote target)));
+      Alcotest.(check int) "clean initialized repository" 0
+        (Sys.command
+           (Printf.sprintf "test -z \"$(git -C %s status --porcelain)\""
+              (Filename.quote target)));
+      Alcotest.(check string) "generic commit author"
+        "Clamp Initializer <clamp@local.invalid>\n"
+        (let output = Filename.concat parent "author" in
+         let command =
+           Printf.sprintf "git -C %s show -s --format='%%an <%%ae>' > %s"
+             (Filename.quote target) (Filename.quote output)
+         in
+         if Sys.command command <> 0 then Alcotest.fail "could not read initial author";
+         read output);
       Alcotest.(check string) "empty TODO"
         (Clamp.Local.render_todo ~now:0. []) (read (Filename.concat target "TODO.md"));
       let validation = Clamp.Bundle.validate target in
@@ -70,9 +88,9 @@ let complete_private_repository () =
       Alcotest.(check bool) "setup executable" true
         (((Unix.stat (Filename.concat target ".agents/setup")).st_perm land 0o100) <> 0);
       Alcotest.(check string) "runtime lock"
-        ("version=0.1.1\n"
+        ("version=0.1.2\n"
          ^ "revision=0123456789abcdef0123456789abcdef01234567\n"
-         ^ "url=https://github.com/gvrooyen/clamp/releases/download/v0.1.1/clamp-0.1.1-linux-x86_64.tar.gz\n"
+         ^ "url=https://github.com/gvrooyen/clamp/releases/download/v0.1.2/clamp-0.1.2-linux-x86_64.tar.gz\n"
          ^ "sha256=" ^ String.make 64 'a' ^ "\n")
         (read (Filename.concat target ".agents/clamp-runtime.lock")))
 
