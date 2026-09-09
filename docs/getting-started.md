@@ -15,7 +15,7 @@ To compile Clamp from source or add another target such as macOS, see
 ## Download the pinned runtime
 
 ```bash
-version=0.1.3
+version=0.1.4
 archive="clamp-${version}-linux-x86_64.tar.gz"
 base="https://github.com/gvrooyen/clamp/releases/download/v${version}"
 
@@ -28,14 +28,14 @@ curl -fLO "$base/$archive" && \
   ./clamp-${version}-linux-x86_64/bin/kb --version
 ```
 
-Expected v0.1.3 SHA-256:
-`e8db5994dc2c954c23b7b057c07e5cd95f77c86414d8b8218a092eca7a3efd59`.
+Expected v0.1.4 SHA-256:
+`f4b9cfbb6736def71eb5c54acae955cfe19b1e03cf519aa4616cad5dd6a53841`.
 Stop if verification fails.
 
 Set a shell variable for the extracted runtime:
 
 ```bash
-runtime="$HOME/.local/share/clamp/downloads/clamp-0.1.3-linux-x86_64"
+runtime="$HOME/.local/share/clamp/downloads/clamp-0.1.4-linux-x86_64"
 ```
 
 ## Amp-hosted private repository
@@ -76,10 +76,10 @@ literal `@` character.
 `kb init` requires a target path that does not exist. Do not run it over a
 clone or any repository with files or history.
 
-The unreleased v0.1.4 source simplifies this step to:
+Use the latest stable release:
 
 ```bash
-kb init \
+"$runtime/bin/kb" init \
   --repo "$HOME/private-clamp-bootstrap" \
   --source-repository ampcode.com/OWNER/private-clamp \
   --latest \
@@ -87,21 +87,10 @@ kb init \
 ```
 
 The shortcut downloads and verifies the latest stable public package, derives
-the exact runtime pin, and uses the selected package's templates. The published
-v0.1.3 binary predates it, so use the explicit v0.1.3 invocation below until
-v0.1.4 is released.
-
-```bash
-source_repository="ampcode.com/OWNER/private-clamp"
-"$runtime/bin/kb" init \
-  --repo "$HOME/private-clamp-bootstrap" \
-  --source-repository "$source_repository" \
-  --runtime-version 0.1.3 \
-  --runtime-revision defcf03edb333de74e69ccc5a45810395f1ebf80 \
-  --runtime-url https://github.com/gvrooyen/clamp/releases/download/v0.1.3/clamp-0.1.3-linux-x86_64.tar.gz \
-  --runtime-sha256 e8db5994dc2c954c23b7b057c07e5cd95f77c86414d8b8218a092eca7a3efd59 \
-  --json
-```
+the exact runtime pin, and uses the selected package's templates. Use
+`--release 0.1.4` instead of `--latest` when you need to select that exact
+release. The four explicit `--runtime-*` options remain available for offline
+or controlled initialization.
 
 Initialization creates one clean commit on `main`. It does not contact the
 remote.
@@ -197,9 +186,9 @@ Keep the extracted Clamp release directory intact and link its executable:
 ```bash
 mkdir -p "$HOME/.local/share/clamp/kb" "$HOME/.local/bin"
 mv "$runtime" \
-  "$HOME/.local/share/clamp/kb/defcf03edb333de74e69ccc5a45810395f1ebf80"
+  "$HOME/.local/share/clamp/kb/75b5c6a9ec63374b5953b8035768388055448738"
 ln -sfn \
-  "$HOME/.local/share/clamp/kb/defcf03edb333de74e69ccc5a45810395f1ebf80/bin/kb" \
+  "$HOME/.local/share/clamp/kb/75b5c6a9ec63374b5953b8035768388055448738/bin/kb" \
   "$HOME/.local/bin/kb"
 export PATH="$HOME/.local/bin:$PATH"
 kb --version
@@ -217,10 +206,7 @@ new local directory. For a private GitHub repository:
 kb init \
   --repo "$HOME/private-clamp" \
   --source-repository github.com/OWNER/private-clamp \
-  --runtime-version 0.1.3 \
-  --runtime-revision defcf03edb333de74e69ccc5a45810395f1ebf80 \
-  --runtime-url https://github.com/gvrooyen/clamp/releases/download/v0.1.3/clamp-0.1.3-linux-x86_64.tar.gz \
-  --runtime-sha256 e8db5994dc2c954c23b7b057c07e5cd95f77c86414d8b8218a092eca7a3efd59 \
+  --release 0.1.4 \
   --json
 
 cd "$HOME/private-clamp"
@@ -234,7 +220,7 @@ normal clone instead of replacing its history.
 
 ### 3. Adapt the generated instructions and run Amp
 
-The v0.1.3 generated instructions target Amp orbs. Before starting Amp locally:
+The generated instructions target Amp orbs. Before starting Amp locally:
 
 1. Update `AGENTS.md` and
    `.agents/skills/managing-clamp-knowledge/SKILL.md` to use the absolute path

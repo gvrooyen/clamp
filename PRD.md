@@ -2,8 +2,8 @@
 
 ## Status
 
-Clamp v1 and Phases 0–9 are implemented. Version 0.1.3 is the latest published
-production release; current source targets 0.1.4. The blocking product and
+Clamp v1 and Phases 0–9 are implemented. Version 0.1.4 is the latest published
+production release. The blocking product and
 architecture decisions are resolved; retrieval coefficients remain tunable
 operational defaults rather than product invariants. Repository-owned
 acceptance is local-only; production deployment and release-tag publication
@@ -96,7 +96,7 @@ telemetry, but telemetry loss is an accepted v1 failure mode.
 
 ## Production distribution
 
-The 0.1.3 release provides a stripped native Linux x86_64 `kb` executable,
+The 0.1.4 release provides a stripped native Linux x86_64 `kb` executable,
 bundles its non-system shared-library closure, and carries the authoritative
 migrations and source-free private-repository templates. A fresh Amp Orb with
 glibc 2.36 or newer must run `kb --version`, `kb --json --help`, and `kb init`

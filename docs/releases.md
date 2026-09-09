@@ -3,11 +3,11 @@
 ## Packaged runtime
 
 The current production release is
-[v0.1.3](https://github.com/gvrooyen/clamp/releases/tag/v0.1.3). Its archive is
-named `clamp-0.1.3-linux-x86_64.tar.gz` and has SHA-256:
+[v0.1.4](https://github.com/gvrooyen/clamp/releases/tag/v0.1.4). Its archive is
+named `clamp-0.1.4-linux-x86_64.tar.gz` and has SHA-256:
 
 ```text
-e8db5994dc2c954c23b7b057c07e5cd95f77c86414d8b8218a092eca7a3efd59
+f4b9cfbb6736def71eb5c54acae955cfe19b1e03cf519aa4616cad5dd6a53841
 ```
 
 The package contains:
@@ -26,7 +26,7 @@ library path.
 
 Always download the adjacent `.sha256` file, run `sha256sum --check`, and check
 `bin/kb --version` before using a package. See
-[Getting started](./getting-started.md) for exact v0.1.3 commands.
+[Getting started](./getting-started.md) for exact v0.1.4 commands.
 
 ## Runtime pin in a private repository
 
@@ -37,12 +37,11 @@ Always download the adjacent `.sha256` file, run `sha256sum --check`, and check
 3. credential-free HTTPS archive URL;
 4. lowercase SHA-256 digest.
 
-Current source builds can derive those fields with `kb init --release X.Y.Z`
+Release v0.1.4 and later can derive those fields with `kb init --release X.Y.Z`
 or `kb init --latest`. The shortcut verifies the public archive and checksum,
 checks its version, revision, layout, size, and executable, and copies templates
-from that selected archive. The published v0.1.3 binary predates the shortcut;
-its explicit initialization command remains in
-[Getting started](./getting-started.md) until v0.1.4 is released.
+from that selected archive. The four explicit runtime-pin options remain
+available for offline or controlled initialization.
 
 Fresh-orb setup downloads and verifies exactly that archive, installs it under
 `$HOME/.local/share/clamp/kb/<revision>`, and atomically activates

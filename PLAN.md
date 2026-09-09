@@ -8,8 +8,8 @@ implementation order, verification gates, and rollout discipline. If work
 uncovers a product ambiguity, stop at the relevant phase gate and update the
 PRD deliberately rather than hiding a decision in code.
 
-Clamp v1 and Phases 0–9 are implemented. Version 0.1.3 is the latest published
-production release; current source targets 0.1.4.
+Clamp v1 and Phases 0–9 are implemented. Version 0.1.4 is the latest published
+production release.
 Repository-owned acceptance remains local-only; production deployment and
 release-tag publication are operator-controlled gates.
 
@@ -125,7 +125,7 @@ conventions before implementing product behavior.
 
 ## Production release build
 
-**Status:** implemented and published for version 0.1.3. Future tags and GitHub
+**Status:** implemented and published through version 0.1.4. Future tags and GitHub
 releases remain operator-controlled external actions.
 
 ### Deliverables

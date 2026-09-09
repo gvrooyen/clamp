@@ -47,10 +47,6 @@ package, derive its exact revision, URL, and SHA-256, and use its own templates.
 Use all four `--runtime-version`, `--runtime-revision`, `--runtime-url`, and
 `--runtime-sha256` options instead for offline or controlled initialization.
 
-The published v0.1.3 binary predates these shortcuts. Until v0.1.4 is released,
-use the explicit invocation in the
-[getting-started guide](./getting-started.md).
-
 `kb validate` checks configuration, concept files, paths, links, and generated
 documents. Warnings such as an unknown non-empty OKF type do not fail the
 command; errors do. `kb todo` regenerates the root task view from task concepts.

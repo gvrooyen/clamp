@@ -9,9 +9,8 @@ Clamp is useful when each agent thread starts in a fresh environment but still
 needs to remember what you decided, what you prefer, and what remains to be
 done.
 
-> Current release: [v0.1.3](https://github.com/gvrooyen/clamp/releases/tag/v0.1.3).
+> Current release: [v0.1.4](https://github.com/gvrooyen/clamp/releases/tag/v0.1.4).
 > Requires x86_64 Linux with glibc 2.36 or newer.
-> Current source targets the unreleased v0.1.4.
 
 ## What Clamp keeps
 
@@ -48,7 +47,7 @@ its non-system shared libraries, SQL migrations, and private-repository
 templates. OCaml, opam, libpq, and libcurl do not need to be installed.
 
 ```bash
-version=0.1.3
+version=0.1.4
 archive="clamp-${version}-linux-x86_64.tar.gz"
 base="https://github.com/gvrooyen/clamp/releases/download/v${version}"
 
@@ -148,7 +147,7 @@ A packaged v0.1.3 or newer installation can replace itself atomically:
 
 ```bash
 kb upgrade --latest
-kb upgrade --version 0.1.3
+kb upgrade --version 0.1.4
 ```
 
 Exact versions may upgrade or downgrade. `--latest` selects the latest stable,
