@@ -2,11 +2,12 @@
 
 ## Status
 
-Clamp v1, Phases 0–9, and the pinned 0.1.2 production-release build are
-implemented. The blocking product and architecture decisions are resolved;
-retrieval coefficients remain tunable operational defaults rather than product
-invariants. Repository-owned acceptance is local-only; production deployment
-and release-tag publication remain operator-controlled.
+Clamp v1 and Phases 0–9 are implemented. Version 0.1.2 is the latest published
+production release; current source targets 0.1.3. The blocking product and
+architecture decisions are resolved; retrieval coefficients remain tunable
+operational defaults rather than product invariants. Repository-owned
+acceptance is local-only; production deployment and release-tag publication
+remain operator-controlled.
 
 ## Product summary
 
@@ -112,6 +113,25 @@ project and executable. The publisher must verify that the local commit, remote
 main, and remote release tag agree before creating a GitHub release. Tag and
 release publication remain operator-controlled external actions.
 
+Release 0.1.3 and later expose exactly one self-update command:
+`kb upgrade --version X.Y.Z` selects a stable exact release and
+`kb upgrade --latest` selects GitHub's latest stable, non-draft,
+non-prerelease release. The options are mutually exclusive. Exact selection
+permits downgrade, while selecting the installed version is an idempotent
+no-op. The command is repository-independent and supports only packaged Linux
+x86_64 release installations; source, opam, and unknown layouts fail without
+mutation. It uses the fixed public `gvrooyen/clamp` GitHub release source and
+the versioned archive/checksum naming contract. It must keep TLS certificate
+and hostname verification enabled, accept redirects only to HTTPS, enforce
+bounded metadata/archive responses and a fixed 512 MiB extracted-file ceiling,
+verify the exact published SHA-256 and safe single-root archive layout, and
+execute the candidate's `kb --version` before installation. The complete
+release directory is exchanged atomically under an installation-parent lock.
+V1 requires base-system `/usr/bin/tar` but no external curl executable, OCaml,
+opam, libpq, or libcurl installation.
+Versions through 0.1.2 require one manual bootstrap installation because they
+predate the command.
+
 ## Repository layout
 
 ```text
@@ -162,13 +182,13 @@ Clamp uses these standard fields with their OKF semantics:
 - `sources` — optional source mappings. Every entry has a `resource`; other
   OKF credibility fields may also be present.
 
-`generated.by` is `human:owner` only when the user literally authored or
-edited the document content. Content written by the Amp agent uses
+`generated.by` is the configured human authority only when the user literally
+authored or edited the document content. Content written by the Amp agent uses
 `amp/agent`; a more specific producer/version may be used only when the runtime
 can identify it reliably.
 
-A `verified.by: human:owner` event records direct current-user authority,
-not agent review. `kb verify` requires
+A `verified.by` event naming the configured human authority records direct
+current-user authority, not agent review. `kb verify` requires
 `--verification-authority user-explicit`, which the skill may assert only when
 the authenticated current user directly requested verification of that concept
 or directly confirmed its exact current content. Missing authority and
@@ -185,9 +205,9 @@ clamp:
 ```
 
 `clamp.asserted_by` records who originated the claim represented by the
-concept. Its value is normally `human:owner` for an explicit user statement
-or `amp/agent` for an agent inference. This remains independent of
-`generated.by`, which records document production.
+concept. Its value is normally the configured human authority for an explicit
+user statement or `amp/agent` for an agent inference. This remains independent
+of `generated.by`, which records document production.
 
 Unknown frontmatter keys must be preserved when a document is round-tripped.
 Clamp must not redefine standard OKF keys with incompatible shapes.
@@ -404,9 +424,9 @@ confirmation policy. Omitting `--superseded-by` leaves any existing
 relationship unchanged. Clearing a relationship requires a complete `kb edit`
 document. Status-only deprecation is idempotent and preserves verification;
 adding or changing the relationship clears stale verification. An explicit
-relationship records `clamp.asserted_by: human:owner`. A confirmed inferred
-relationship records `clamp.asserted_by: amp/agent` and appends a fresh human
-verification event after clearing stale events.
+relationship records the configured human authority in `clamp.asserted_by`. A
+confirmed inferred relationship records `clamp.asserted_by: amp/agent` and
+appends a fresh human verification event after clearing stale events.
 
 Readers take a shared Linux `flock` and writers take an exclusive `flock` on
 the already-open repository-root directory inode; no lock pathname is used.
@@ -466,6 +486,8 @@ The CLI provides at least:
 - `kb sync` — synchronize the remote default branch into Postgres.
 - `kb publish` — validate, commit managed knowledge changes, rebase, push, and
   invoke sync for the pushed commit.
+- `kb upgrade <--version X.Y.Z|--latest>` — replace a packaged CLI release
+  independently of any knowledge repository.
 - `kb config set inferred-writes <confirm|auto_draft>` — change the inference
   policy after an explicit user instruction.
 
@@ -1010,6 +1032,13 @@ retrieval:
   frequency_saturation_count: 100
 ```
 
+`human_authority` is an optional repository-specific `human:` identifier used
+for canonical human assertions and verification events. Its omission defaults
+to `human:owner`, which is the public repository's convention. A downstream
+private repository may set its own authority without exposing that identity in
+this public repository. Accepted identifiers are at most 255 bytes and use an
+ASCII alphanumeric, hyphen, underscore, period, or `@` suffix after `human:`.
+
 `source_repository` is a stable non-secret identifier. It uses a lowercase DNS
 host followed by a slash-separated repository path; path components may use
 the literal `@` spelling required by Amp identities. It has no scheme,
@@ -1049,7 +1078,8 @@ retrieval gates in their own environment with explicit approval.
 1. A fresh Orb with the three project secrets can install the CLI, validate the
    bundle, synchronize the remote main branch, and search it.
 2. A user-stated fact written by the agent records `generated.by: amp/agent`
-   and `clamp.asserted_by: human:owner`.
+   and the configured human authority in `clamp.asserted_by`; omission of the
+   setting produces `human:owner`.
 3. With `inferred_writes: confirm`, the skill does not persist an inference
    before the user confirms it.
 4. Changing the policy to `auto_draft` requires an explicit user instruction

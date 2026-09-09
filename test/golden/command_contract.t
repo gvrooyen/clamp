@@ -3,13 +3,13 @@ Top-level metadata is available without executing product behavior.
   $ unset KB_DATABASE_URL KB_DATABASE_DIRECT_URL OPENROUTER_API_KEY
   $ repo="$PWD/fixture"; mkdir -p "$repo/knowledge"; cp -L ../../clamp.yaml "$repo/"; kb --repo "$repo" todo --quiet
   $ kb --version
-  0.1.2
+  0.1.3
 
 Initialization creates a complete source-free private repository without
 network or production operations.
 
   $ runtime_root="$PWD/runtime-root"; mkdir -p "$runtime_root/share/clamp"; cp -LR ../../runtime/templates "$runtime_root/share/clamp/"
-  $ private="$PWD/private"; kb init --repo "$private" --source-repository example.invalid/owner/private-clamp --runtime-version 0.1.2 --runtime-revision 0123456789abcdef0123456789abcdef01234567 --runtime-url https://example.invalid/clamp-0.1.2-linux-x86_64.tar.gz --runtime-sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --runtime-root "$runtime_root" --json | sed "s#${private}#PRIVATE#"
+  $ private="$PWD/private"; kb init --repo "$private" --source-repository example.invalid/owner/private-clamp --runtime-version 0.1.3 --runtime-revision 0123456789abcdef0123456789abcdef01234567 --runtime-url https://example.invalid/clamp-0.1.3-linux-x86_64.tar.gz --runtime-sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --runtime-root "$runtime_root" --json | sed "s#${private}#PRIVATE#"
   {"ok":true,"code":"repository_initialized","data":{"path":"PRIVATE","source_repository":"example.invalid/owner/private-clamp","runtime_revision":"0123456789abcdef0123456789abcdef01234567"}}
   $ git -C "$private" branch --show-current; git -C "$private" remote | wc -l; git -C "$private" rev-list --count HEAD; test -z "$(git -C "$private" status --porcelain)"
   main
@@ -31,6 +31,18 @@ Retrieval commands fail safely before external access when credentials are absen
          -v, --verbose
   $ kb verify --help=plain | grep -F -- '--verification-authority=AUTHORITY'
          --verification-authority=AUTHORITY
+  $ kb upgrade --help=plain | grep -E -- '--version=X.Y.Z|--latest' | sed 's/^ *//'
+  --latest
+  --version=X.Y.Z
+  $ kb upgrade --json
+  {"ok":false,"code":"upgrade_selection_required","message":"Supply exactly one of --version X.Y.Z and --latest.","details":{}}
+  [2]
+  $ kb upgrade --version invalid --json
+  {"ok":false,"code":"upgrade_version_invalid","message":"--version must be a stable X.Y.Z release version.","details":{}}
+  [2]
+  $ kb upgrade --version 0.1.3 --latest --json
+  {"ok":false,"code":"upgrade_selection_required","message":"Supply exactly one of --version X.Y.Z and --latest.","details":{}}
+  [2]
   $ kb --repo "$repo" get --json facts/example
   {"ok":false,"code":"database_url_missing","message":"KB_DATABASE_URL is required for retrieval.","details":{"fallback":"local_markdown_or_rg","semantic_equivalent":false}}
   [2]
@@ -133,6 +145,8 @@ Every PRD command leaf is wired to its current implementation contract.
   sync: status=2 code=source_repository_missing
   $ check_leaf publish publish
   publish: status=2 code=invalid_arguments
+  $ check_leaf upgrade upgrade
+  upgrade: status=2 code=upgrade_selection_required
   $ kb publish 2>&1
   kb: Invalid command arguments.
   [2]

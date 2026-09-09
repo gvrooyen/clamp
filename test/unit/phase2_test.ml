@@ -230,6 +230,74 @@ let provenance_and_verification () =
           Alcotest.(check int) "stale verification cleared" 0
             (List.length (Clamp.Local.verification_events changed.metadata))))
 
+let configured_human_authority () =
+  with_clock (fun () ->
+      with_bundle (fun root ->
+          let config_path = Filename.concat root "clamp.yaml" in
+          write config_path
+            (Str.replace_first (Str.regexp_string "inferred_writes: confirm")
+               "inferred_writes: confirm\nhuman_authority: human:test-owner"
+               config);
+          let add id claim confirmed =
+            ignore
+              (get_ok
+                 (Clamp.Local.mutate ~repo:root ~id ~contents:(fact ()) ~claim
+                    ~confirmed ~allow_unknown:false ~create:true))
+          in
+          let document id =
+            Clamp.Frontmatter.parse
+              (read (Filename.concat root ("knowledge/" ^ id ^ ".md")))
+            |> Result.get_ok
+          in
+          let asserted_by id =
+            Option.bind
+              (Option.bind
+                 (Clamp.Exact_yaml.find "clamp" (document id).metadata)
+                 (Clamp.Exact_yaml.find "asserted_by"))
+              Clamp.Exact_yaml.string
+          in
+          let verifier id =
+            match List.rev (Clamp.Local.verification_events (document id).metadata) with
+            | event :: _ ->
+                Option.bind (Clamp.Exact_yaml.find "by" event)
+                  Clamp.Exact_yaml.string
+            | [] -> None
+          in
+          add "facts/target" "explicit" false;
+          add "facts/explicit" "explicit" false;
+          Alcotest.(check (option string)) "configured explicit assertion"
+            (Some "human:test-owner") (asserted_by "facts/explicit");
+          add "facts/inference" "inferred" true;
+          Alcotest.(check (option string)) "inference remains agent assertion"
+            (Some "amp/agent") (asserted_by "facts/inference");
+          Alcotest.(check (option string)) "configured inferred confirmation"
+            (Some "human:test-owner") (verifier "facts/inference");
+          ignore
+            (get_ok
+               (Clamp.Local.verify ~authority:(Some "user-explicit") root
+                  "facts/explicit"));
+          Alcotest.(check (option string)) "configured direct verification"
+            (Some "human:test-owner") (verifier "facts/explicit");
+          ignore
+            (get_ok
+               (Clamp.Local.deprecate_checked ~claim:"explicit" ~confirmed:false
+                  root "facts/explicit" (Some "facts/target")));
+          Alcotest.(check (option string))
+            "configured explicit relationship assertion"
+            (Some "human:test-owner") (asserted_by "facts/explicit");
+          add "facts/inferred-relationship" "explicit" false;
+          ignore
+            (get_ok
+               (Clamp.Local.deprecate_checked ~claim:"inferred" ~confirmed:true
+                  root "facts/inferred-relationship" (Some "facts/target")));
+          Alcotest.(check (option string))
+            "inferred relationship remains agent assertion"
+            (Some "amp/agent") (asserted_by "facts/inferred-relationship");
+          Alcotest.(check (option string))
+            "configured inferred relationship confirmation"
+            (Some "human:test-owner")
+            (verifier "facts/inferred-relationship")))
+
 let auto_draft_unknown_and_config () =
   with_clock (fun () ->
       with_bundle (fun root ->
@@ -6095,6 +6163,7 @@ let todo_tests =
 
 let mutation_tests =
   [ ("provenance and verification", `Quick, provenance_and_verification);
+    ("configured human authority", `Quick, configured_human_authority);
     ("auto draft, unknown type, config", `Quick, auto_draft_unknown_and_config);
     ("canonical status policy", `Quick, canonical_status_policy);
     ("exact provenance and auto-draft", `Quick, exact_provenance_and_auto_draft);
@@ -6157,6 +6226,7 @@ let expected_registry_manifest =
     ("TODO", "safe label escaping");
     ("TODO", "validation edges");
     ("mutation", "provenance and verification");
+    ("mutation", "configured human authority");
     ("mutation", "auto draft, unknown type, config");
     ("mutation", "canonical status policy");
     ("mutation", "exact provenance and auto-draft");
@@ -6203,7 +6273,7 @@ let expected_registry_manifest =
 
 let complete_registry_guard () =
   let pair_testable = Alcotest.pair Alcotest.string Alcotest.string in
-  Alcotest.(check int) "exact Phase 2 test count" 48
+  Alcotest.(check int) "exact Phase 2 test count" 49
     (List.length registry_manifest);
   Alcotest.check (Alcotest.list pair_testable)
     "exact ordered Phase 2 suite/group/name manifest"

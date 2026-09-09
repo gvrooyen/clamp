@@ -2283,29 +2283,22 @@ let validate_managed_output ~name contents =
 
 let type_name document = Option.bind (find "type" document.Frontmatter.metadata) string
 
-let policy_at root =
+let write_configuration_at root =
   Result.bind (read_at root "clamp.yaml") (fun contents ->
       match Config.validate contents with
       | Error _ -> error "config_invalid" "Configuration is invalid."
       | Ok () ->
           match Exact_yaml.parse contents with
           | Ok yaml ->
+              let human_authority =
+                Option.value ~default:Config.default_human_authority
+                  (Option.bind (find "human_authority" yaml) string)
+              in
               (match Option.bind (find "inferred_writes" yaml) string with
-              | Some ("confirm" | "auto_draft" as policy) -> Ok policy
+              | Some ("confirm" | "auto_draft" as policy) ->
+                  Ok (policy, human_authority)
               | _ -> assert false)
           | Error _ -> assert false)
-
-let authorize root ~claim ~confirmed =
-  match (claim, confirmed) with
-  | "explicit", true ->
-      error "contradictory_authority" "--confirmed is only valid for inferred claims."
-  | "explicit", false -> Ok (`Explicit, false)
-  | "inferred", _ ->
-      Result.bind (policy_at root) (fun policy ->
-          if policy = "confirm" && not confirmed then
-            error "confirmation_required" "Inferred writes require confirmation."
-          else Ok (`Inferred, policy = "auto_draft" && not confirmed))
-  | _ -> error "invalid_claim" "--claim must be explicit or inferred."
 
 let validate_authority_shape ~claim ~confirmed =
   match (claim, confirmed) with
@@ -2313,6 +2306,20 @@ let validate_authority_shape ~claim ~confirmed =
       error "contradictory_authority" "--confirmed is only valid for inferred claims."
   | ("explicit" | "inferred"), _ -> Ok ()
   | _ -> error "invalid_claim" "--claim must be explicit or inferred."
+
+let authorize root ~claim ~confirmed =
+  Result.bind (validate_authority_shape ~claim ~confirmed) (fun () ->
+      Result.bind (write_configuration_at root) (fun (policy, human_authority) ->
+          match claim with
+          | "explicit" -> Ok (`Explicit, false, human_authority)
+          | "inferred" ->
+              if policy = "confirm" && not confirmed then
+                error "confirmation_required" "Inferred writes require confirmation."
+              else
+                Ok
+                  (`Inferred, policy = "auto_draft" && not confirmed,
+                   human_authority)
+          | _ -> assert false))
 
 let verification_events metadata =
   match find "verified" metadata with
@@ -2358,9 +2365,12 @@ let canonicalize root ~claim ~confirmed ~old supplied =
            = Concept.Preserve_verification -> true
     | _ -> false
   in
-  Result.bind (authorize root ~claim ~confirmed) (fun (authority, auto_draft) ->
+  Result.bind (authorize root ~claim ~confirmed)
+    (fun (authority, auto_draft, human_authority) ->
       let time = timestamp () in
-      let asserted_by = match authority with `Explicit -> "human:owner" | `Inferred -> "amp/agent" in
+      let asserted_by =
+        match authority with `Explicit -> human_authority | `Inferred -> "amp/agent"
+      in
       let persisted_clamp =
         if preserve then classification_clamp
         else set "asserted_by" (scalar asserted_by) clamp
@@ -2391,7 +2401,7 @@ let canonicalize root ~claim ~confirmed ~old supplied =
       let confirmed_event =
         match (authority, confirmed) with
         | `Inferred, true when not preserve ->
-            [ Map [ ("by", scalar "human:owner"); ("at", scalar time) ] ]
+            [ Map [ ("by", scalar human_authority); ("at", scalar time) ] ]
         | _ -> []
       in
       let events = preserved @ confirmed_event in
@@ -4159,7 +4169,7 @@ let update ?(allow_lifecycle = false) ?(update_generated = true)
                           error "file_not_found" "Managed file does not exist."
                     in
                     let* old = parse_document contents in
-                    let* (changed : Frontmatter.t) = transform old in
+                    let* (changed : Frontmatter.t) = transform root old in
                     let* () =
                       register_semantic_read_set
                         ~read_paths:(semantic_reference_paths changed)
@@ -4218,10 +4228,11 @@ let verify ~authority repo id =
       error "verification_authority_required"
         "--verification-authority user-explicit is required."
   | Some "user-explicit" ->
-      update ~update_generated:false repo id (fun document ->
+      update ~update_generated:false repo id (fun root document ->
+          let* _, human_authority = write_configuration_at root in
           let event =
             Map
-              [ ("by", scalar "human:owner");
+              [ ("by", scalar human_authority);
                 ("at", scalar (timestamp ())) ]
           in
           Ok
@@ -4251,7 +4262,7 @@ let deprecate_checked ~claim ~confirmed repo id superseded_by =
             if relation old = relation transformed && old_status = new_status then Ok ()
             else Result.map (fun _ -> ()) (authorize root ~claim ~confirmed))
       in
-      update ~authorize_change ~skip_unchanged:true repo id (fun document ->
+      update ~authorize_change ~skip_unchanged:true repo id (fun root document ->
           let clamp = Option.value (find "clamp" document.metadata) ~default:(Map []) in
           let previous_relation = relation document in
           let next_relation =
@@ -4261,16 +4272,21 @@ let deprecate_checked ~claim ~confirmed repo id superseded_by =
              && next_relation = previous_relation
           then Ok document
           else
+          let relationship_changed = next_relation <> previous_relation in
+          let* human_authority =
+            if relationship_changed then
+              Result.map snd (write_configuration_at root)
+            else Ok Config.default_human_authority
+          in
           let clamp =
-            let relationship_changed = next_relation <> previous_relation in
-            let clamp =
-              match superseded_by with
-              | None -> clamp
-              | Some replacement -> set "superseded_by" (scalar replacement) clamp
-            in
+            match superseded_by with
+            | None -> clamp
+            | Some replacement -> set "superseded_by" (scalar replacement) clamp
+          in
+          let clamp =
             if relationship_changed then
               set "asserted_by"
-                (scalar (if claim = "explicit" then "human:owner" else "amp/agent"))
+                (scalar (if claim = "explicit" then human_authority else "amp/agent"))
                 clamp
             else clamp
           in
@@ -4292,7 +4308,9 @@ let deprecate_checked ~claim ~confirmed repo id superseded_by =
             if previous_relation <> next_relation
                && claim = "inferred" && confirmed then
               let event =
-                Map [ ("by", scalar "human:owner"); ("at", scalar (timestamp ())) ]
+                Map
+                  [ ("by", scalar human_authority);
+                    ("at", scalar (timestamp ())) ]
               in
               set "verified" (Seq (verification_events metadata @ [ event ])) metadata
             else metadata
@@ -4398,7 +4416,7 @@ let transition ?closure_authority repo id target =
      && not (Option.exists valid_closure_authority closure_authority)
   then error "closure_authority_required" "A valid closure authority is required."
   else
-  update ~allow_lifecycle:true repo id (fun document ->
+  update ~allow_lifecycle:true repo id (fun _ document ->
       match task_of id document with
       | None -> error "not_a_task" "Concept is not a task."
       | Some task when not (transition_allowed task.state target) ->

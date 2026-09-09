@@ -59,7 +59,7 @@
   produced the current document content, not who asserted the claim.
 - Agent-authored content normally uses `generated.by: amp/agent`.
 - Record claim origin under `clamp.asserted_by`, normally
-  `human:owner` or `amp/agent`.
+  the configured human authority (default `human:owner`) or `amp/agent`.
 - Keep Clamp-specific metadata under the top-level `clamp` extension mapping.
 - Preserve unknown frontmatter keys when round-tripping a concept.
 - Use the v1 taxonomy from the PRD. Persisted unknown non-empty OKF types
@@ -70,9 +70,10 @@
   replacement.
 - Clear stale verification events after an unconfirmed semantic edit. Preserve
   them only for non-semantic edits or replace them with a new confirmation.
-- Record `verified.by: human:owner` only when the authenticated current user
-  directly requested verification or confirmed the exact current content;
-  agent review alone is not verification authority.
+- Record `verified.by` with the configured human authority (default
+  `human:owner`) only when the authenticated current user directly requested
+  verification or confirmed the exact current content; agent review alone is
+  not verification authority.
 
 ## Inference and task behavior
 

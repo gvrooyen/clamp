@@ -99,6 +99,12 @@ opam, libpq, and libcurl do not need to be installed.
 The archive also contains the authoritative SQL migrations and templates used
 to initialize source-free private knowledge repositories. See the public Clamp
 README for the required kb init release URL, revision, and SHA-256 arguments.
+
+For release 0.1.3 and newer, bin/kb upgrade can replace this complete package
+in place. That operation additionally requires the base system's /usr/bin/tar.
+
+The kb CLI operates on a Clamp repository. Run it from that repository or pass
+--repo /path/to/repository.
 EOF
 
 rpath="$(readelf -d "$stage/bin/kb" | sed -nE 's/.*\((RPATH|RUNPATH)\).*\[([^]]+)\].*/\2/p')"

@@ -5,10 +5,10 @@ let check_json name expected actual =
 let success_envelope () =
   let result =
     Clamp.Cli_result.success ~code:"ready"
-      ~data:(`Assoc [ ("version", `String "0.1.0") ])
+      ~data:(`Assoc [ ("version", `String "0.1.3") ])
   in
   check_json "success envelope"
-    {|{"ok":true,"code":"ready","data":{"version":"0.1.0"}}|}
+    {|{"ok":true,"code":"ready","data":{"version":"0.1.3"}}|}
     result;
   Alcotest.(check int) "success exit" 0 (Clamp.Cli_result.exit_code result)
 

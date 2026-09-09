@@ -409,6 +409,26 @@ let config_contract () =
     Fun.protect ~finally:(fun () -> close_in channel) (fun () ->
         really_input_string channel (in_channel_length channel))
   in
+  Alcotest.(check (result string string)) "default human authority"
+    (Ok "human:owner") (Clamp.Config.human_authority source);
+  let configured_authority =
+    Str.replace_first (Str.regexp_string "inferred_writes: confirm")
+      "inferred_writes: confirm\nhuman_authority: human:test-owner" source
+  in
+  Alcotest.(check (result unit string)) "configured human authority accepted"
+    (Ok ()) (Clamp.Config.validate configured_authority);
+  Alcotest.(check (result string string)) "configured human authority"
+    (Ok "human:test-owner")
+    (Clamp.Config.human_authority configured_authority);
+  List.iter
+    (fun value ->
+      let invalid =
+        Str.replace_first (Str.regexp_string "inferred_writes: confirm")
+          ("inferred_writes: confirm\nhuman_authority: " ^ value) source
+      in
+      Alcotest.(check bool) ("invalid human authority " ^ value) true
+        (Result.is_error (Clamp.Config.validate invalid)))
+    [ "human:"; "amp/agent"; "human:test owner"; "42" ];
   let cases =
     [ ("timezone", "Africa/Johannesburg", "UTC");
       ("schema type", "schema_version: 1", "schema_version: \"1\"");

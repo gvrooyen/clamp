@@ -185,7 +185,8 @@ kb add facts/neon-migrations-use-direct-connection --input /tmp/clamp-fact.md --
 
 Expect `concept_added`. Agent-authored transcription records
 `generated.by: amp/agent` and, because the statement was explicit,
-`clamp.asserted_by: human:owner`.
+`clamp.asserted_by` with the repository's configured human authority (default
+`human:owner`).
 
 ### Confirmed inference
 
@@ -234,10 +235,11 @@ kb edit facts/neon-migrations-use-direct-connection --input /tmp/clamp-fact-revi
 Expect `concept_edited`. Semantic unconfirmed edits clear stale verification;
 formatting-only or link-only edits may preserve it.
 
-`kb verify` records `verified.by: human:owner`, so agent review is never
-sufficient authority. Run it only when the authenticated current user directly
-requested verification of this concept or directly confirmed the exact current
-concept content. Then assert that authority explicitly:
+`kb verify` records `verified.by` with the repository's configured human
+authority (default `human:owner`), so agent review is never sufficient
+authority. Run it only when the authenticated current user directly requested
+verification of this concept or directly confirmed the exact current concept
+content. Then assert that authority explicitly:
 
 ```bash
 kb verify facts/neon-migrations-use-direct-connection --verification-authority user-explicit --json

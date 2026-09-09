@@ -4,6 +4,11 @@
  (libraries clamp alcotest yojson unix))
 
 (test
+ (name upgrade_test)
+ (modules upgrade_test)
+ (libraries clamp alcotest digestif unix))
+
+(test
  (name phase1_test)
  (modules phase1_test)
  (deps

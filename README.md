@@ -4,10 +4,10 @@ Clamp is a personal, agent-managed knowledge base for Amp Orbs. It keeps durable
 knowledge and tasks as human-readable, Git-versioned Markdown while using Neon
 Postgres and pgvector for fast semantic retrieval.
 
-> **Status:** Clamp v1 and Phases 0–9 are implemented. The pinned 0.1.2
-> production-release build is also implemented. Repository-owned acceptance is
-> local-only and does not authorize production database or publication
-> operations.
+> **Status:** Clamp v1 and Phases 0–9 are implemented. Version 0.1.2 is the
+> latest published production release; current source targets 0.1.3.
+> Repository-owned acceptance is local-only and does not authorize production
+> database or publication operations.
 
 The full product and architecture contract is in [PRD.md](./PRD.md), and the
 phased delivery sequence is in [PLAN.md](./PLAN.md). Guidance for agents
@@ -85,6 +85,7 @@ kb validate
 kb database migrate
 kb sync
 kb publish
+kb upgrade <--version X.Y.Z|--latest>
 kb config set inferred-writes <confirm|auto_draft>
 ```
 
@@ -109,6 +110,8 @@ kb sync --commit <exact-origin-main-sha> --json
 kb sync --reembed --json
 kb sync --allow-mass-deletion --json
 kb publish --thread-id T-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx --json
+kb upgrade --version 0.1.3 --json
+kb upgrade --latest --json
 ```
 
 All executable commands accept `--repo`/`--repo-root`, `--json`, `--quiet`, and
@@ -226,6 +229,11 @@ evidence is not a claim that the production skill workflow has run.
 
 The strict versioned configuration, exact-scalar YAML syntax-tree parser,
 canonical frontmatter serializer, and bundle/path/link validator now exist.
+Root `clamp.yaml` may set an optional repository-specific human authority, for
+example `human_authority: human:example-owner`. Clamp uses it when canonicalizing
+explicit human assertions and direct-user verification events; omission keeps
+the public default `human:owner`. The public repository intentionally omits the
+setting, so downstream repositories can select their own identity locally.
 Canonical rewrites preserve unknown semantic values (including large integer
 lexemes and nested multiline strings) but intentionally do not preserve YAML
 comments, exact quote/literal scalar styles, or original key ordering. YAML
@@ -870,6 +878,25 @@ The binary operates on a Clamp checkout. Run it from the checkout or pass
 `--repo /path/to/clamp`. Keep the extracted `bin/` and `lib/` directories
 together because the executable resolves its bundled libraries relative to
 itself.
+
+Starting with 0.1.3, a packaged release can replace itself in place:
+
+```bash
+kb upgrade --version X.Y.Z
+kb upgrade --latest
+```
+
+The options are mutually exclusive. Exact versions may upgrade or downgrade;
+selecting the installed version is an idempotent no-op. `--latest` follows
+GitHub's latest stable (non-draft, non-prerelease) release. Clamp downloads the
+Linux x86_64 archive and its published checksum over verified HTTPS, enforces
+bounded download and extracted-file limits plus the expected archive layout,
+verifies SHA-256 and the candidate's reported version, then atomically exchanges
+the complete release directory. It refuses opam, source-tree, and other
+non-release installations. The upgrade path uses the base system's
+`/usr/bin/tar`; no OCaml, opam, external curl command, libpq, or libcurl
+installation is needed. Versions through 0.1.2 predate this command and must be
+replaced manually once with 0.1.3 or newer.
 
 `release/build` creates and validates the archive locally from the committed
 opam lock and runs the unit suite in Dune's release profile. The canonical

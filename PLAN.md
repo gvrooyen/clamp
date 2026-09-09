@@ -8,9 +8,10 @@ implementation order, verification gates, and rollout discipline. If work
 uncovers a product ambiguity, stop at the relevant phase gate and update the
 PRD deliberately rather than hiding a decision in code.
 
-Clamp v1, Phases 0–9, and the pinned 0.1.2 production-release build are
-implemented. Repository-owned acceptance remains local-only; production
-deployment and release-tag publication are operator-controlled gates.
+Clamp v1 and Phases 0–9 are implemented. Version 0.1.2 is the latest published
+production release; current source targets 0.1.3.
+Repository-owned acceptance remains local-only; production deployment and
+release-tag publication are operator-controlled gates.
 
 ## Delivery principles
 
@@ -124,7 +125,7 @@ conventions before implementing product behavior.
 
 ## Production release build
 
-**Status:** implemented for version 0.1.2. Publishing the `v0.1.2` tag and
+**Status:** implemented for version 0.1.3. Publishing the `v0.1.3` tag and
 GitHub release remains an operator-controlled external action.
 
 ### Deliverables
@@ -141,6 +142,11 @@ GitHub release remains an operator-controlled external action.
 - After an exactly matching `v<version>` tag and commit reach `origin`, use the
   guarded publisher to verify the refs and checksum before creating the GitHub
   release with the prebuilt archive and checksum.
+- From 0.1.3, provide repository-independent exact/latest self-upgrades for
+  packaged releases. Resolve only the fixed public GitHub release source,
+  bound downloads, verify the published SHA-256, archive shape, and candidate
+  version, and atomically exchange the complete installation. Reject source,
+  opam, and unknown installation layouts without mutation.
 
 ### Verification and exit gate
 
@@ -149,6 +155,9 @@ GitHub release remains an operator-controlled external action.
 - Every non-glibc dependency resolves inside the staged archive.
 - Repeating the build for the same source epoch produces the same archive
   checksum.
+- Unit and command-contract tests cover version/latest selection, strict
+  release/checksum parsing, mismatch preservation, candidate validation, and
+  verified atomic replacement without updater residue.
 
 ## Phase 1: Configuration, OKF parsing, and bundle validation
 
@@ -164,8 +173,9 @@ Implement the deterministic local format layer that every later phase trusts.
 ### Deliverables
 
 - Add the versioned `clamp.yaml` defaults from the PRD and a strict config
-  loader for schema version, timezone, inference policy, embedding identity,
-  routing controls, the embedding input byte ceiling, and retrieval
+  loader for schema version, timezone, inference policy, the optional
+  repository-specific human authority (defaulting to `human:owner`), embedding
+  identity, routing controls, the embedding input byte ceiling, and retrieval
   coefficients.
 - Parse Markdown frontmatter into a representation that retains unknown YAML
   keys and separates the body without claiming comment or scalar-style
@@ -863,10 +873,10 @@ output and every cram citation against the registered cram source heading.
 | PRD criterion | Named automated evidence | Manual/credentialed evidence |
 | --- | --- | --- |
 | 1. Fresh Orb installs, validates, syncs, and searches | `phase8_workflow_test` / `workflow` / `fresh sync through publish and resync`; `phase5_sync_test` / `sync` / `retrieval vertical slice`; `command_contract.t` / `Top-level metadata is available without executing product behavior.` | **Operator gate:** repeat in the target environment. |
-| 2. Explicit user fact records agent producer and human assertion | `phase2_test` / `mutation` / `provenance and verification` | **None:** the persisted parsed metadata is asserted exactly as `generated.by: amp/agent` and `clamp.asserted_by: human:owner`. |
+| 2. Explicit user fact records agent producer and configured human assertion | `phase2_test` / `mutation` / `provenance and verification`; `phase2_test` / `mutation` / `configured human authority` | **None:** the persisted parsed metadata is asserted exactly as `generated.by: amp/agent` and the configured authority, including the omitted-setting default `human:owner`. |
 | 3. `confirm` blocks an unconfirmed inference | `phase2_test` / `mutation` / `provenance and verification`; `phase8_workflow_test` / `workflow` / `fresh sync through publish and resync`; `phase8_skill_test` / `skill` / `command fixture policy` | **None:** the no-write invariant is local and credential-free. |
 | 4. Explicit `auto_draft` policy creates an unverified draft | `phase2_test` / `mutation` / `auto draft, unknown type, config`; `phase8_workflow_test` / `workflow` / `fresh sync through publish and resync`; `phase8_skill_test` / `skill` / `command fixture policy`; `command_contract.t` / `Changing inferred-write policy requires explicit direct-user intent.` | **None:** the CLI rejection proves explicit intent is required, and the local mutation/workflow evidence proves unverified draft creation after the policy is selected. |
-| 5. Human verification requires direct current-user authority | `phase2_test` / `mutation` / `provenance and verification`; `phase8_workflow_test` / `workflow` / `fresh sync through publish and resync`; `command_contract.t` / `Phase 2 accepts complete Markdown documents from files and stdin without shell-quoting their bodies, while authority remains separate CLI input.` | **None:** current-user authority acceptance and agent-only rejection are deterministic CLI policy. |
+| 5. Human verification requires direct current-user authority | `phase2_test` / `mutation` / `provenance and verification`; `phase2_test` / `mutation` / `configured human authority`; `phase8_workflow_test` / `workflow` / `fresh sync through publish and resync`; `command_contract.t` / `Phase 2 accepts complete Markdown documents from files and stdin without shell-quoting their bodies, while authority remains separate CLI input.` | **None:** current-user authority acceptance, configured canonical identity, and agent-only rejection are deterministic CLI policy. |
 | 6. Stable task mutation deterministically updates TODO and detects drift | `phase2_test` / `tasks` / `lifecycle/history/drift`; `phase2_test` / `TODO` / `ordering and boundaries`; `command_contract.t` / `Phase 2 accepts complete Markdown documents from files and stdin without shell-quoting their bodies, while authority remains separate CLI input.` | **None:** concept/TODO identity, rendering, and drift are local filesystem behavior. |
 | 7. Directly performed and verified work may be closed without another confirmation | `phase8_workflow_test` / `workflow` / `fresh sync through publish and resync`; `phase2_test` / `tasks` / `lifecycle/history/drift`; `phase8_skill_test` / `skill` / `command fixture policy` | **None:** closure authority is enforced locally. |
 | 8. Out-of-date non-force publication, TODO regeneration, and race recovery | `phase7_publication_test` / `publication` / `clean, shallow, and out-of-date`; `phase7_publication_test` / `publication` / `generated TODO conflict`; `phase7_publication_test` / `publication` / `clean races and recovery` | **None:** disposable bare remotes cover all required Git races without risking `origin/main`. |

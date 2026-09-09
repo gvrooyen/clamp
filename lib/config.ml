@@ -12,6 +12,17 @@ let number = function
   | Scalar ((Integer | Float), value) -> float_of_string_opt value
   | _ -> None
 
+let default_human_authority = "human:owner"
+
+let valid_human_authority value =
+  let prefix_length = String.length "human:" in
+  String.length value > prefix_length && String.length value <= 255
+  && String.starts_with ~prefix:"human:" value
+  && String.sub value prefix_length (String.length value - prefix_length)
+     |> String.for_all (function
+          | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' | '.' | '@' -> true
+          | _ -> false)
+
 type retrieval = {
   candidate_limit : int;
   result_limit : int;
@@ -71,11 +82,20 @@ let validate contents =
       match parse contents with
       | Error _ as error -> error
       | Ok top ->
-              let top_keys =
+              let required_top_keys =
                 [ "schema_version"; "source_repository"; "timezone";
                   "inferred_writes"; "embedding"; "retrieval" ]
               in
-              if not (keys_equal top_keys top) then
+              let allowed_top_keys = "human_authority" :: required_top_keys in
+              if
+                not
+                  (List.for_all
+                     (fun key -> Option.is_some (find_field key top))
+                     required_top_keys
+                  && List.for_all
+                       (fun (key, _) -> List.mem key allowed_top_keys)
+                       top)
+              then
                 Error "configuration has missing or unknown keys"
               else if find_field "schema_version" top <> Some (Scalar (Integer, "1")) then
                 Error "schema_version must be integer 1"
@@ -93,6 +113,13 @@ let validate contents =
                      (Option.bind (find_field "inferred_writes" top) string)
                      [ Some "confirm"; Some "auto_draft" ])
               then Error "inferred_writes must be confirm or auto_draft"
+              else if
+                not
+                  (match find_field "human_authority" top with
+                  | None -> true
+                  | Some value ->
+                      Option.exists valid_human_authority (string value))
+              then Error "human_authority must be a nonempty human: identifier"
               else
                 match
                   ( Option.bind (find_field "embedding" top) fields,
@@ -199,6 +226,13 @@ let source_repository contents =
       | None -> Error "source_repository_missing"
       | Some value when valid_source_repository value -> Ok value
       | Some _ -> Error "source_repository_invalid")
+
+let human_authority contents =
+  Result.bind (validate contents) (fun () ->
+      Result.bind (parse contents) (fun top ->
+          match Option.bind (find_field "human_authority" top) string with
+          | None -> Ok default_human_authority
+          | Some value -> Ok value))
 
 let retrieval contents =
   Result.bind (validate contents) (fun () ->

@@ -7,7 +7,7 @@ type common_options = {
   diagnostic : bool;
 }
 
-let version = "0.1.2"
+let version = "0.1.3"
 
 let exits =
   let info kind doc = Cmd.Exit.info ~doc (Clamp.Exit_class.code kind) in
@@ -648,6 +648,73 @@ let verify =
                     ("concept_verified", `Assoc [ ("id", `String id) ]))))
       $ concept $ authority $ common_options)
 
+let emit_upgrade options = function
+  | Ok (success : Clamp.Upgrade.success) ->
+      let data =
+        `Assoc
+          [ ("previous_version", `String success.previous_version);
+            ("version", `String success.version);
+            ("changed", `Bool success.changed) ]
+      in
+      let human =
+        if success.changed then
+          Printf.sprintf "Clamp upgraded from %s to %s."
+            success.previous_version success.version
+        else Printf.sprintf "Clamp %s is already installed." success.version
+      in
+      emit ~human ~command:"upgrade" options "upgrade_complete" data
+  | Error (failure : Clamp.Upgrade.error) ->
+      let exit_class = Clamp.Upgrade.exit_class failure in
+      let result =
+        Clamp.Cli_result.failure ~exit_class ~code:failure.code
+          ~message:failure.message ~details:(`Assoc [])
+      in
+      emit_diagnostic options ~command:"upgrade" ~exit_class;
+      if options.json then print_endline (Clamp.Cli_result.to_json_string result)
+      else if not options.quiet then Printf.eprintf "kb: %s\n" failure.message;
+      Clamp.Cli_result.exit_code result
+
+let upgrade =
+  let selected_version =
+    Arg.
+      (value & opt (some string) None
+      & info [ "version" ] ~docv:"X.Y.Z"
+          ~doc:"Install the exact stable Clamp release version X.Y.Z.")
+  and latest =
+    Arg.
+      (value & flag
+      & info [ "latest" ] ~doc:"Install GitHub's latest stable Clamp release.")
+  in
+  Cmd.v
+    (command_info "upgrade"
+       "Securely upgrade a packaged Clamp release installation.")
+    Term.
+      (const
+         (fun selected_version latest options ->
+           match (selected_version, latest) with
+           | Some selected_version, false ->
+               Clamp.Upgrade.run ~current_version:version
+                 (Version selected_version)
+               |> emit_upgrade options
+           | None, true ->
+               Clamp.Upgrade.run ~current_version:version Latest
+               |> emit_upgrade options
+           | _ ->
+               let result =
+                 Clamp.Cli_result.failure ~exit_class:User_error
+                   ~code:"upgrade_selection_required"
+                   ~message:"Supply exactly one of --version X.Y.Z and --latest."
+                   ~details:(`Assoc [])
+               in
+               emit_diagnostic options ~command:"upgrade" ~exit_class:User_error;
+               if options.json then
+                 print_endline (Clamp.Cli_result.to_json_string result)
+               else if not options.quiet then
+                 Printf.eprintf
+                   "kb: Supply exactly one of --version X.Y.Z and --latest.\n";
+               Clamp.Cli_result.exit_code result)
+      $ selected_version $ latest $ common_options)
+
 let command =
   let doc = "Native CLI for the Clamp knowledge base." in
   let commands =
@@ -666,11 +733,12 @@ let command =
       validate;
       sync;
       publish;
+      upgrade;
       database;
       config;
     ]
   in
-  Cmd.group (command_info "kb" ~version doc) commands
+  Cmd.group (command_info "kb" doc) commands
 
 type fallback_selection = Top | Task | Database | Config_set | Config_leaf | Complete
 
@@ -689,7 +757,7 @@ let inspect_fallback_argv argv =
   let repo = ref "." and command = ref "kb" and selection = ref Top in
   let top_commands =
     [ "init"; "add"; "edit"; "verify"; "deprecate"; "todo"; "validate"; "task";
-      "database"; "config"; "search"; "get"; "sync"; "publish" ]
+      "database"; "config"; "search"; "get"; "sync"; "publish"; "upgrade" ]
   in
   let task_commands = [ "add"; "list"; "start"; "block"; "done"; "cancel" ] in
   let value_options =
@@ -697,13 +765,13 @@ let inspect_fallback_argv argv =
       "--closure-authority"; "--verification-authority"; "--local-database";
       "--migrations-dir"; "--source-repository"; "--runtime-version";
       "--runtime-revision"; "--runtime-url"; "--runtime-sha256";
-      "--runtime-root"; "--commit"; "--thread-id" ]
+      "--runtime-root"; "--commit"; "--thread-id"; "--version" ]
   in
   let boolean_options =
     [ "--json"; "--quiet"; "-q"; "--diagnostic"; "--stdin";
       "--confirmed"; "--allow-unknown-type"; "--history";
       "--direct-user-intent"; "--reembed"; "--allow-mass-deletion";
-      "--preserve-conflict";
+      "--preserve-conflict"; "--latest";
       "--include-deprecated"; "--include-stale"; "--include-closed-tasks";
       "--verbose"; "-v" ]
   in
@@ -812,6 +880,10 @@ let inspect_fallback_argv argv =
          :: (List.rev !regular @ List.rev !common_arguments @ suffix)) }
 
 let () =
+  if Array.length Sys.argv = 2 && Sys.argv.(1) = "--version" then begin
+    print_endline version;
+    exit (Clamp.Exit_class.code Success)
+  end;
   let context = inspect_fallback_argv Sys.argv in
   let fallback_options = context.fallback_options in
   let fallback_command = context.fallback_command in
