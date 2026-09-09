@@ -7,7 +7,7 @@ type common_options = {
   diagnostic : bool;
 }
 
-let version = "0.1.0"
+let version = "0.1.1"
 
 let exits =
   let info kind doc = Cmd.Exit.info ~doc (Clamp.Exit_class.code kind) in

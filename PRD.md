@@ -2,7 +2,7 @@
 
 ## Status
 
-Clamp v1, Phases 0–9, and the pinned 0.1.0 production-release build are
+Clamp v1, Phases 0–9, and the pinned 0.1.1 production-release build are
 implemented. The blocking product and architecture decisions are resolved;
 retrieval coefficients remain tunable operational defaults rather than product
 invariants. Repository-owned acceptance is local-only; production deployment
@@ -95,12 +95,13 @@ telemetry, but telemetry loss is an accepted v1 failure mode.
 
 ## Production distribution
 
-The 0.1.0 release provides a stripped native Linux x86_64 `kb` executable and
-bundles its non-system shared-library closure. A fresh Amp Orb with glibc 2.36
-or newer must run `kb --version` and `kb --json --help` from the extracted
-archive without installing OCaml, opam, libpq, or libcurl. The executable uses
-an origin-relative RPATH so its libraries do not modify the process environment
-or affect Git subprocesses.
+The 0.1.1 release provides a stripped native Linux x86_64 `kb` executable,
+bundles its non-system shared-library closure, and carries the authoritative
+migrations and source-free private-repository templates. A fresh Amp Orb with
+glibc 2.36 or newer must run `kb --version`, `kb --json --help`, and `kb init`
+from the extracted archive without installing OCaml, opam, libpq, or libcurl.
+The executable uses an origin-relative RPATH so its libraries do not modify the
+process environment or affect Git subprocesses.
 
 The canonical release build pins the container image digest, Debian archive
 snapshot, opam binary checksum, opam-repository commit, OCaml compiler, Dune,

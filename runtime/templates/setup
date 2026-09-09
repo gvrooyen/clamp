@@ -101,17 +101,20 @@ install_runtime() {
     trap 'rm -rf -- "${temp_dir:-}"' RETURN
     archive="$temp_dir/runtime.tar.gz"
     curl --fail --silent --show-error --location --proto '=https' \
+      --proto-redir '=https' \
       --tlsv1.2 --retry 3 --connect-timeout 10 --max-time 120 \
-      --max-filesize 16777216 "$runtime_url" --output "$archive"
+      --max-filesize 67108864 "$runtime_url" --output "$archive"
     printf '%s  %s\n' "$runtime_sha256" "$archive" | sha256sum --check --status
 
     python3 - "$archive" "$runtime_version" "$cli_revision" <<'PY'
-import sys, tarfile
+import re, sys, tarfile
 archive, version, revision = sys.argv[1:]
-prefix = f"clamp-runtime-{version}-linux-x86_64/"
-expected = {
+root = f"clamp-{version}-linux-x86_64"
+prefix = root + "/"
+required = {
     prefix + "bin/kb", prefix + "REVISION", prefix + "VERSION",
-    prefix + "LICENSE", prefix + "share/clamp/migrations/0001_enable_vector.sql",
+    prefix + "LICENSE", prefix + "README.txt", prefix + "THIRD_PARTY_NOTICES",
+    prefix + "share/clamp/migrations/0001_enable_vector.sql",
     prefix + "share/clamp/migrations/0002_application_schema.sql",
     prefix + "share/clamp/templates/setup", prefix + "share/clamp/templates/resume",
     prefix + "share/clamp/templates/skill.md", prefix + "share/clamp/templates/AGENTS.md",
@@ -123,16 +126,27 @@ with tarfile.open(archive, "r:gz") as value:
     for member in value.getmembers():
         if member.issym() or member.islnk() or not (member.isdir() or member.isfile()):
             raise SystemExit("unsafe runtime archive entry")
-        if not member.name.startswith(prefix) or "/../" in "/" + member.name:
+        name = member.name.rstrip("/")
+        parts = name.split("/")
+        if (not parts or parts[0] != root
+                or any(not re.fullmatch(r"[A-Za-z0-9._:+-]+", part)
+                       for part in parts)):
             raise SystemExit("unsafe runtime archive path")
         if member.isfile():
-            files.add(member.name); total += member.size
-    if files != expected or total > 16 * 1024 * 1024:
+            relative = name[len(prefix):]
+            allowed_library = relative.startswith("lib/") and relative.count("/") == 1
+            allowed_license = (relative.startswith("share/licenses/")
+                               and relative.endswith("/copyright")
+                               and relative.count("/") == 3)
+            if name not in required and not allowed_library and not allowed_license:
+                raise SystemExit("unexpected runtime archive file")
+            files.add(name); total += member.size
+    if not required.issubset(files) or total > 64 * 1024 * 1024:
         raise SystemExit("unexpected runtime archive contents")
 PY
     tar --extract --gzip --file "$archive" --directory "$temp_dir" \
       --no-same-owner --no-same-permissions
-    payload="$temp_dir/clamp-runtime-${runtime_version}-linux-x86_64"
+    payload="$temp_dir/clamp-${runtime_version}-linux-x86_64"
     [[ "$(cat "$payload/REVISION")" == "$cli_revision" ]]
     [[ "$(cat "$payload/VERSION")" == "$runtime_version" ]]
     "$payload/bin/kb" --version >/dev/null

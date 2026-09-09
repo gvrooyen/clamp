@@ -3,13 +3,13 @@ Top-level metadata is available without executing product behavior.
   $ unset KB_DATABASE_URL KB_DATABASE_DIRECT_URL OPENROUTER_API_KEY
   $ repo="$PWD/fixture"; mkdir -p "$repo/knowledge"; cp -L ../../clamp.yaml "$repo/"; kb --repo "$repo" todo --quiet
   $ kb --version
-  0.1.0
+  0.1.1
 
 Initialization creates a complete source-free private repository without
 network or production operations.
 
   $ runtime_root="$PWD/runtime-root"; mkdir -p "$runtime_root/share/clamp"; cp -LR ../../runtime/templates "$runtime_root/share/clamp/"
-  $ private="$PWD/private"; kb init --repo "$private" --source-repository example.invalid/owner/private-clamp --runtime-version 0.1.0 --runtime-revision 0123456789abcdef0123456789abcdef01234567 --runtime-url https://example.invalid/clamp-runtime.tar.gz --runtime-sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --runtime-root "$runtime_root" --json | sed "s#${private}#PRIVATE#"
+  $ private="$PWD/private"; kb init --repo "$private" --source-repository example.invalid/owner/private-clamp --runtime-version 0.1.1 --runtime-revision 0123456789abcdef0123456789abcdef01234567 --runtime-url https://example.invalid/clamp-0.1.1-linux-x86_64.tar.gz --runtime-sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --runtime-root "$runtime_root" --json | sed "s#${private}#PRIVATE#"
   {"ok":true,"code":"repository_initialized","data":{"path":"PRIVATE","source_repository":"example.invalid/owner/private-clamp","runtime_revision":"0123456789abcdef0123456789abcdef01234567"}}
   $ git -C "$private" branch --show-current; git -C "$private" remote | wc -l
   main

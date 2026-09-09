@@ -8,7 +8,7 @@ implementation order, verification gates, and rollout discipline. If work
 uncovers a product ambiguity, stop at the relevant phase gate and update the
 PRD deliberately rather than hiding a decision in code.
 
-Clamp v1, Phases 0–9, and the pinned 0.1.0 production-release build are
+Clamp v1, Phases 0–9, and the pinned 0.1.1 production-release build are
 implemented. Repository-owned acceptance remains local-only; production
 deployment and release-tag publication are operator-controlled gates.
 
@@ -124,7 +124,7 @@ conventions before implementing product behavior.
 
 ## Production release build
 
-**Status:** implemented for version 0.1.0. Publishing the `v0.1.0` tag and
+**Status:** implemented for version 0.1.1. Publishing the `v0.1.1` tag and
 GitHub release remains an operator-controlled external action.
 
 ### Deliverables

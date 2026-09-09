@@ -34,10 +34,10 @@ let check_ok = function
 let create root target =
   Clamp.Initializer.create ~target
     ~source_repository:"example.invalid/owner/private-clamp"
-    ~runtime_version:"0.1.0"
+    ~runtime_version:"0.1.1"
     ~runtime_revision:"0123456789abcdef0123456789abcdef01234567"
     ~runtime_url:
-      "https://github.com/gvrooyen/clamp/releases/download/v0.1.0/clamp-runtime-0.1.0-linux-x86_64.tar.gz"
+      "https://github.com/gvrooyen/clamp/releases/download/v0.1.1/clamp-0.1.1-linux-x86_64.tar.gz"
     ~runtime_sha256:(String.make 64 'a') ~runtime_root:root ()
 
 let complete_private_repository () =
@@ -70,9 +70,9 @@ let complete_private_repository () =
       Alcotest.(check bool) "setup executable" true
         (((Unix.stat (Filename.concat target ".agents/setup")).st_perm land 0o100) <> 0);
       Alcotest.(check string) "runtime lock"
-        ("version=0.1.0\n"
+        ("version=0.1.1\n"
          ^ "revision=0123456789abcdef0123456789abcdef01234567\n"
-         ^ "url=https://github.com/gvrooyen/clamp/releases/download/v0.1.0/clamp-runtime-0.1.0-linux-x86_64.tar.gz\n"
+         ^ "url=https://github.com/gvrooyen/clamp/releases/download/v0.1.1/clamp-0.1.1-linux-x86_64.tar.gz\n"
          ^ "sha256=" ^ String.make 64 'a' ^ "\n")
         (read (Filename.concat target ".agents/clamp-runtime.lock")))
 

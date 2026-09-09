@@ -3,14 +3,17 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 version="$(sed -nE 's/^\(version ([^)]+)\)$/\1/p' "$repo_root/dune-project")"
+revision="$(git -C "$repo_root" rev-parse HEAD)"
 target=linux-x86_64
 archive_name="clamp-${version}-${target}"
 stage="$repo_root/_build/release-package/$archive_name"
 dist="$repo_root/dist"
 
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+[[ "$revision" =~ ^[0-9a-f]{40}$ ]]
 [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]]
 grep -Fqx "version: \"$version\"" "$repo_root/clamp.opam.locked"
+[[ -z "$(git -C "$repo_root" status --porcelain --untracked-files=no)" ]]
 
 cd "$repo_root"
 opam install . --deps-only --with-test --locked --yes
@@ -18,9 +21,18 @@ opam exec -- dune runtest --release test/unit
 opam exec -- dune build --release bin/kb.exe
 
 rm -rf -- "$stage"
-mkdir -p "$stage/bin" "$stage/lib" "$stage/share/licenses" "$dist"
+mkdir -p "$stage/bin" "$stage/lib" "$stage/share/licenses" \
+  "$stage/share/clamp/migrations" "$stage/share/clamp/templates" "$dist"
 install -m 0755 _build/default/bin/kb.exe "$stage/bin/kb"
 strip --strip-unneeded "$stage/bin/kb"
+install -m 0644 db/migrations/*.sql "$stage/share/clamp/migrations/"
+install -m 0755 runtime/templates/setup runtime/templates/resume \
+  "$stage/share/clamp/templates/"
+install -m 0644 runtime/templates/skill.md runtime/templates/AGENTS.md \
+  runtime/templates/README.md runtime/templates/gitignore \
+  "$stage/share/clamp/templates/"
+printf '%s\n' "$revision" >"$stage/REVISION"
+printf '%s\n' "$version" >"$stage/VERSION"
 
 if [[ "$($stage/bin/kb --version)" != "$version" ]]; then
   printf 'Built kb version does not match dune-project version %s.\n' "$version" >&2
@@ -84,8 +96,9 @@ Run bin/kb directly. The package includes its non-system shared libraries and
 requires only an x86_64 Linux environment with glibc 2.36 or newer; OCaml,
 opam, libpq, and libcurl do not need to be installed.
 
-The kb CLI operates on a Clamp repository. Run it from that repository or pass
---repo /path/to/repository.
+The archive also contains the authoritative SQL migrations and templates used
+to initialize source-free private knowledge repositories. See the public Clamp
+README for the required kb init release URL, revision, and SHA-256 arguments.
 EOF
 
 rpath="$(readelf -d "$stage/bin/kb" | sed -nE 's/.*\((RPATH|RUNPATH)\).*\[([^]]+)\].*/\2/p')"
