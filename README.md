@@ -59,7 +59,9 @@ curl -fLO "$base/$archive" && \
 ```
 
 Continue with the [full setup guide](./docs/getting-started.md) to initialize a
-source-free knowledge repository and connect it to a private remote.
+knowledge repository that contains no Clamp application implementation source
+and connect it to a private remote. Until the generated setup activates `kb`,
+invoke it from the extracted release directory as shown in that guide.
 
 ## Using Clamp from Amp
 

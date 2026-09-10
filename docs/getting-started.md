@@ -93,7 +93,18 @@ release. The four explicit `--runtime-*` options remain available for offline
 or controlled initialization.
 
 Initialization creates one clean commit on `main`. It does not contact the
-remote.
+remote. Validate the new repository with the executable you just downloaded:
+
+```bash
+"$runtime/bin/kb" validate \
+  --repo "$HOME/private-clamp-bootstrap" \
+  --json
+```
+
+The generated instructions use `kb` on `PATH` and
+`/home/user/workspace/repo` because they apply after Amp clones the private
+repository and runs its setup. During bootstrap, continue using
+`"$runtime/bin/kb"` and the bootstrap path as above.
 
 ### 3. Set your authority identifier
 
@@ -104,18 +115,22 @@ add it at the top level of `clamp.yaml` before the first push:
 human_authority: human:your-identifier
 ```
 
-Then amend the initial commit. `human_authority` is provenance, not a Git author
-name.
+`human_authority` is provenance, not a Git author name. Validate the edited
+configuration before amending the initial commit:
 
 ```bash
 cd "$HOME/private-clamp-bootstrap"
+"$runtime/bin/kb" validate --repo "$PWD" --json
 git config user.name "YOUR_GIT_NAME"
 git config user.email "YOUR_GIT_EMAIL"
 git add clamp.yaml
 git commit --amend --no-edit
 ```
 
-If you keep the default and made no edit, skip the amend.
+The amended commit keeps `Clamp Initializer` as its author and records your Git
+identity as its committer. This distinguishes generated bootstrap content from
+the person who reviewed it. If you keep the default and made no edit, skip the
+amend.
 
 ### 4. Seed the empty Amp repository
 
@@ -154,7 +169,10 @@ Start a new thread in the project. Amp runs the generated `.agents/setup` when
 building the project snapshot and `.agents/resume` after a wake. Setup verifies
 the four-field runtime lock, installs that exact public release outside the
 repository, restores empty taxonomy directories, and prepares disposable local
-Postgres. It does not migrate or synchronize production services.
+Postgres. On its supported Debian orb environment, setup may install required
+OS packages and initialize or start local PostgreSQL. It is an orb bootstrap,
+not a general-purpose installer for your own machine. It does not migrate or
+synchronize production services.
 
 Ask the agent to run:
 
