@@ -140,7 +140,7 @@ index and lossy access statistics:
 - Concept rows and embeddings can be rebuilt from Git.
 - A successful Git publication is never reverted because indexing failed.
 
-Read [Architecture](./docs/architecture.md) for synchronization, retrieval,
+Read [Architecture](./ARCHITECTURE.md) for synchronization, retrieval,
 publication, and trust boundaries.
 
 ## Upgrade
@@ -165,7 +165,7 @@ installation can make its revision pin inconsistent. See
 - [Getting started](./docs/getting-started.md)
 - [CLI guide](./docs/cli.md)
 - [Using Clamp with Amp](./docs/amp.md)
-- [Architecture](./docs/architecture.md)
+- [Architecture](./ARCHITECTURE.md)
 - [Knowledge format and configuration](./docs/knowledge-format.md)
 - [Operations](./docs/operations.md)
 - [Failure recovery](./docs/recovery.md)
@@ -174,7 +174,8 @@ installation can make its revision pin inconsistent. See
 - [Releases and upgrades](./docs/releases.md)
 
 [PRD.md](./PRD.md) is the authoritative v1 product and behavior contract.
-[PLAN.md](./PLAN.md) records implementation phases and acceptance evidence.
+[ARCHITECTURE.md](./ARCHITECTURE.md) records enduring implementation boundaries.
+[ACCEPTANCE.md](./ACCEPTANCE.md) maps PRD criteria to evidence and rollout gates.
 [AGENTS.md](./AGENTS.md) contains repository-development guidance.
 
 Clamp is distributed under the [MIT License](./LICENSE).

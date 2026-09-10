@@ -15,7 +15,7 @@ Start with the [project README](../README.md) for the short overview.
 
 ## Understand and operate Clamp
 
-- [Architecture](./architecture.md) – data ownership, synchronization,
+- [Architecture](../ARCHITECTURE.md) – data ownership, synchronization,
   retrieval, and publication.
 - [Operations](./operations.md) – Neon, OpenRouter, secrets, migration, sync,
   and rollout boundaries.
@@ -31,7 +31,9 @@ Start with the [project README](../README.md) for the short overview.
 - [Development and acceptance](./development.md) – source checkout setup,
   tests, and the hermetic acceptance runner.
 - [PRD](../PRD.md) – authoritative v1 product and behavior contract.
-- [Plan](../PLAN.md) – implementation sequence and acceptance traceability.
+- [Architecture](../ARCHITECTURE.md) – implementation boundaries and design
+  controls.
+- [Acceptance](../ACCEPTANCE.md) – criterion traceability and rollout gates.
 - [Repository guidance](../AGENTS.md) – constraints for contributors and
   agents changing this source repository.
 

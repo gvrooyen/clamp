@@ -71,7 +71,7 @@ acceptance matrix. An ambient `CLAMP_REVIEWED_PHASE7_KB` is rejected rather than
 executed.
 
 The criterion-to-evidence map is in
-[PLAN.md](../PLAN.md#acceptance-criteria-traceability).
+[ACCEPTANCE.md](../ACCEPTANCE.md#acceptance-criteria-traceability).
 
 ## Review rules
 

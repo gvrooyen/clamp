@@ -82,9 +82,9 @@ let clean_process_environment =
   [| "PATH=/usr/bin:/bin"; "HOME=/nonexistent"; "LC_ALL=C"; "LANG=C";
      "ALCOTEST_COLOR=never" |]
 
-let matrix_rows plan =
+let matrix_rows acceptance =
   section ~heading:"## Acceptance-criteria traceability"
-    ~next_heading:"## Cross-phase risk register" plan
+    ~next_heading:"## Maintaining acceptance evidence" acceptance
   |> String.split_on_char '\n'
   |> List.filter_map (fun line ->
          if
@@ -185,8 +185,8 @@ let validate_citation registries citation =
   else Alcotest.failf "invalid acceptance citation syntax: %s" citation
 
 let complete_criterion_matrix () =
-  let plan = read (path "PLAN.md") in
-  let rows = matrix_rows plan in
+  let acceptance = read (path "ACCEPTANCE.md") in
+  let rows = matrix_rows acceptance in
   Alcotest.(check (list int)) "matrix maps criteria 1-19 exactly once"
     (List.init 19 (fun index -> index + 1))
     (List.map (fun (number, _, _) -> number) rows);
@@ -243,7 +243,8 @@ let documentation_and_cli_contract_drift () =
   and amp_guide = read (path "docs/amp.md")
   and recovery_guide = read (path "docs/recovery.md")
   and development_guide = read (path "docs/development.md")
-  and plan = read (path "PLAN.md")
+  and acceptance = read (path "ACCEPTANCE.md")
+  and architecture = read (path "ARCHITECTURE.md")
   and prd = read (path "PRD.md")
   and agents = read (path "AGENTS.md")
   and opam = read (path "clamp.opam")
@@ -298,8 +299,10 @@ let documentation_and_cli_contract_drift () =
     ".agents/phase9-acceptance";
   check_contains "skill local acceptance boundary" skill
     ".agents/phase9-acceptance";
-  check_contains "PLAN public status" plan
-    "Repository-owned acceptance remains";
+  check_contains "ACCEPTANCE public status" acceptance
+    "does not authorize or prove";
+  check_contains "ARCHITECTURE authority" architecture
+    "product behavior and exact safety invariants are normative";
   List.iter
     (fun (label, contents) -> check_contains (label ^ " implemented status") contents
         "implemented")
@@ -309,14 +312,16 @@ let documentation_and_cli_contract_drift () =
     (fun stale ->
       check_absent ("README removes stale compatibility status " ^ stale)
         readme stale;
-      check_absent ("PLAN removes stale compatibility status " ^ stale) plan stale)
+      check_absent ("ACCEPTANCE removes stale compatibility status " ^ stale)
+        acceptance stale)
     [ "reviewed Phase 7 CLI compatibility check, final";
       "external compatibility, clean-room";
       "leaves it pending"; "external gates remain" ];
   check_contains "README records current release" readme "v0.1.3";
   check_contains "operations guide marks production operator-controlled"
     (read (path "docs/operations.md")) "no production authority";
-  check_absent "PLAN has no pending matrix disposition" plan "**Pending:**"
+  check_absent "ACCEPTANCE has no pending matrix disposition" acceptance
+    "**Pending:**"
 
 let write_executable file body =
   let channel = open_out_bin file in

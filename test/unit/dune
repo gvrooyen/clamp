@@ -44,7 +44,7 @@
  (modules phase8_skill_test)
  (deps
   ../../.agents/skills/managing-clamp-knowledge/SKILL.md
-  ../../PLAN.md
+  ../../ACCEPTANCE.md
   ../../PRD.md
   (source_tree ../fixtures/phase8))
  (libraries clamp alcotest str yojson))
@@ -56,8 +56,9 @@
   ../../.agents/phase9-acceptance
   ../../.gitignore
   ../../.ocaml-version
+  ../../ACCEPTANCE.md
   ../../AGENTS.md
-  ../../PLAN.md
+  ../../ARCHITECTURE.md
   ../../PRD.md
   ../../README.md
   ../../TODO.md

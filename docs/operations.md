@@ -120,7 +120,7 @@ evidence only; they grant no production authority.
 Before first production use:
 
 1. Review the local acceptance result and the matrix in
-   [PLAN.md](../PLAN.md#acceptance-criteria-traceability).
+   [ACCEPTANCE.md](../ACCEPTANCE.md#acceptance-criteria-traceability).
 2. Verify the private repository identity and the exact runtime pin.
 3. Configure secrets without exposing their values.
 4. Obtain approval before migration or other shared-state changes.

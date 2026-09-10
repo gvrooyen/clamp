@@ -4,8 +4,8 @@
 
 - Read `PRD.md` before making product, data-model, storage, indexing, task, or
   publication changes. It is the authoritative v1 contract.
-- Read `PLAN.md` for implementation order, phase gates, and acceptance-criteria
-  traceability.
+- Read `ARCHITECTURE.md` for implementation boundaries and `ACCEPTANCE.md` for
+  acceptance-criteria traceability and rollout gates.
 - Read `README.md` for the user-facing project status and setup flow.
 - Clamp v1 and Phases 0–9 are implemented. Repository-owned acceptance is
   local-only and does not authorize or prove production operations.

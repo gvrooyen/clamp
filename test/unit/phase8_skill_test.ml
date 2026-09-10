@@ -10,7 +10,7 @@ let fixture_path =
   Filename.concat source_root "test/fixtures/phase8/command-results.json"
 
 let prd_path = Filename.concat source_root "PRD.md"
-let plan_path = Filename.concat source_root "PLAN.md"
+let acceptance_path = Filename.concat source_root "ACCEPTANCE.md"
 
 let read path =
   let channel = open_in_bin path in
@@ -134,22 +134,22 @@ let numbered_lines ~heading ~next_heading text pattern =
          else None)
 
 let acceptance_traceability () =
-  let prd = read prd_path and plan = read plan_path in
+  let prd = read prd_path and acceptance = read acceptance_path in
   let prd_rows =
     numbered_lines ~heading:"## V1 acceptance criteria"
       ~next_heading:"## Deferred and tunable work" prd
       (Str.regexp "^\\([0-9]+\\)\\. ")
-  and plan_rows =
+  and acceptance_rows =
     numbered_lines ~heading:"## Acceptance-criteria traceability"
-      ~next_heading:"## Cross-phase risk register" plan
+      ~next_heading:"## Maintaining acceptance evidence" acceptance
       (Str.regexp "^| \\([0-9]+\\)\\. ")
   in
   let expected = List.init 19 (fun index -> index + 1) in
   Alcotest.(check (list int)) "PRD has exactly criteria 1-19" expected
     (List.map fst prd_rows);
-  Alcotest.(check (list int)) "PLAN maps exactly criteria 1-19" expected
-    (List.map fst plan_rows);
-  let verification_row = List.assoc 5 plan_rows in
+  Alcotest.(check (list int)) "ACCEPTANCE maps exactly criteria 1-19" expected
+    (List.map fst acceptance_rows);
+  let verification_row = List.assoc 5 acceptance_rows in
   List.iter
     (fun evidence ->
       check_contains ("criterion 5 names " ^ evidence) verification_row evidence)
