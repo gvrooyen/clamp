@@ -9,8 +9,11 @@ until its native acceptance gates pass.
 
 Status on 2026-09-11:
 
-- Linux x86-64 on local ext4 is a candidate. Repository and current Orb
-  observations are captured; a clean non-Orb local runner is still needed.
+- Linux x86-64 on local ext4 is a candidate after native non-Orb testing.
+  Filesystem primitives, source-free bootstrap, authenticated read-only Amp
+  Git, local-runner thread/owner-email interfaces, and a private
+  PostgreSQL/pgvector harness passed. Ordinary-update requalification remains
+  pending.
 - Apple-silicon macOS is now a candidate after native testing on macOS 26.5.2
   (build 25F84). Local writable case-insensitive APFS primitives and a private
   PostgreSQL/pgvector harness passed. The minimum is conservatively fixed to
@@ -61,6 +64,19 @@ body was retained.
 | immutable 0.1.4 HTTPS proxy/private-CA experiment | The reviewed release executable honored `HTTPS_PROXY` and opened only `CONNECT github.com:443`, but rejected the private CA when supplied process-locally through `CURL_CA_BUNDLE` and `SSL_CERT_FILE`; it sent no HTTP request and returned `init_release_network_error` (5). | The proposed proxy fixture is not viable and must not be used as release evidence. |
 | immutable 0.1.4 offline compatibility mechanism | After independent SHA-256 verification and extraction of the public 0.1.4 archive, the same immutable executable accepted its exact version, revision, public URL, archive digest, and extracted runtime root through the explicit offline initializer; it returned `repository_initialized`, produced one commit and no remote, and reproduced the recorded runtime-lock digest. | Use this qualified offline mechanism with independently validated final legacy-archive bytes before publication; test public download discovery separately after publication. |
 
+Native Linux observations from runner `clamp-linux`:
+
+| Observation | Result | Contract consequence |
+| --- | --- | --- |
+| Host | Arch Linux rolling, kernel 7.2.3-arch1-3, native x86-64, glibc 2.44, local ext4 | Provides a native example within the existing Linux x86-64/glibc ≥2.36/ext4 candidate range; it does not directly test the glibc 2.36 boundary or qualify another libc/filesystem. |
+| ext4 primitives | File/directory `fsync`, descriptor `flock`, hard-link identity, `O_NOFOLLOW`, descriptor-relative operations, `renameat2` no-replace/exchange, rollback, and retained-parent replacement detection passed | Native filesystem implementation is feasible; application-level failure injection remains with implementation. |
+| Amp installation | `$HOME/.local/bin/amp` symlink to regular x86-64 ELF `$HOME/.amp/bin/amp`; version `0.0.1789113641-gcd8b8a`; public SHA-256 `b85abf99057ee68be28be6867d2032611d303a3fa6fddaee1d6c2b2d22234185` matched the official checksum; retained chain was safe and unchanged | Freeze this version as the common minimum and the direct-install path as the Linux shape. Ordinary-update requalification remains required. |
+| Existing-project clone | Disposable `amp clone user-skills` succeeded. Repository-local helper, `useHttpPath`, author name, and author email were unset; effective helper was `!amp git-credential-helper` with default-false `useHttpPath`. | Publication requires repository-local author configuration. Reconstruct the validated absolute helper rather than trusting ambient configuration. |
+| Isolated authenticated Git | Bounded read-only `ls-remote` succeeded with the absolute helper, explicit `useHttpPath=true`, disabled system/global config and prompts, and only `HOME`, `PATH`, `GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL`, and `GIT_TERMINAL_PROMPT` | Freeze this Linux allowlist and helper invocation for the observed direct-install shape. |
+| Local Amp interfaces | Authenticated runner supplied exact thread ID/URL, current-user identity, and owner-bound `send_email`; no email was sent | Interface feasibility passed; preservation ordering, deduplication, and delivery remain later end-to-end gates. |
+| Native tools | Bash 5.3.15; Git 2.55.0; curl 8.22.0/OpenSSL 3.6.4; strict-wrapper-tested Python 3.14.7; GNU tar 1.35; sha256sum 9.11; rg 15.2.0 | Bootstrap semantics passed with the observed versions, which exceed the retained Linux floors; this run did not test the exact minimum versions. Opam, OCaml, Dune, and PostgreSQL remain build/test inputs, not consumer prerequisites. |
+| Disposable database | Private PostgreSQL 15.19 and pinned pgvector 0.8.1 on Unix socket with TCP disabled; both migrations, UTF-8, schema constraints, vector(1536), and actual HNSW scan passed | Native database feasibility passed without ambient or production credentials. |
+
 Native Apple-silicon observations from runner `clamp-macos`:
 
 | Observation | Result | Contract consequence |
@@ -86,9 +102,9 @@ or local helper environment.
 Before implementation begins, Phase 1 must:
 
 1. Run the local Amp helper/layout/update/thread-identity/email checks below on
-   a clean non-Orb Linux runner. On Mac, complete only ordinary-update
-   requalification; local-executor thread/owner-notification feasibility and
-   consumer bootstrap qualification passed in the native runner.
+   each retained target. On Linux and Mac, only ordinary-update requalification
+   remains; local helper, filesystem, database, consumer-bootstrap, and runner-
+   interface feasibility passed.
 2. Freeze each retained target's minimum OS, filesystem, exact source-free
    consumer bootstrap tools and versions, exact local Amp environment
    allowlist, and disposable PostgreSQL/pgvector feasibility harness from

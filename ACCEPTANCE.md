@@ -5,9 +5,10 @@
 Clamp v1 and the original implementation phases 0–9 are complete. Version
 0.1.4 is the latest published production release. Release 0.2.0 Phase 1 is in
 progress: its non-native contract fixtures are repository-owned, but Linux
-local-runner qualification and part of Apple-silicon macOS qualification remain
-pending. Native Mac APFS and disposable database feasibility have passed; no
-local target is accepted or advertised yet.
+and Apple-silicon macOS ordinary-update requalification remains pending. Native
+filesystem, source-free bootstrap, isolated Amp Git, local-runner interfaces,
+and disposable database feasibility passed on both candidates; no local target
+is accepted or advertised yet.
 
 [PRD.md](./PRD.md) is authoritative for product behavior. This document maps
 that contract to repository-owned evidence and defines the boundary between
@@ -180,13 +181,13 @@ tests must not convert an Orb observation or mock into native target evidence.
 
 | PRD 0.2 criterion | Repository-owned Phase 1 evidence | Remaining native/implementation gate |
 | --- | --- | --- |
-| L1. Advertised targets are natively qualified | `v0_2_phase1_test` / `contract freeze` / `target and environment fixtures`; native Mac APFS, frozen 26.5.2/bootstrap contract, isolated authenticated read-only Amp Git, local-runner thread/email interfaces, and private PostgreSQL 15.19/pgvector 0.8.1 feasibility evidence | **Phase 1 pending:** non-Orb Linux qualification and Mac ordinary-update requalification. **Later phases:** Darwin runtime/package implementation, signing, application-level durability, and end-to-end gates. |
+| L1. Advertised targets are natively qualified | `v0_2_phase1_test` / `contract freeze` / `target and environment fixtures`; native ext4/APFS, frozen bootstrap contracts, isolated authenticated read-only Amp Git, local-runner thread/email interfaces, and private PostgreSQL 15.19/pgvector 0.8.1 feasibility evidence on both candidates | **Phase 1 pending:** ordinary-update requalification on Linux and Mac. **Later phases:** runtime/package implementation, signing where applicable, application-level durability, and end-to-end gates. |
 | L2. Setup is clean, idempotent, and failure-preserving | Fixture contract only | Phase 4 implementation plus native end-to-end. |
 | L3. Repository launcher selects independent pins | Fresh-0.2 scaffold inventory fixture | Phase 4 implementation and alternating-repository native test. |
 | L4. Exact 0.1.4 migration is fail-closed | Exact and owner-modified scaffold fixtures | Phase 4 migration, interruption, and recovery tests. |
 | L5. Local Amp authentication is narrow | Sanitized Orb/clone observation fixture; hostile-state cases | Phase 5 helper implementation and real local-login/update gate on each target. |
 | L6. Local and Orb semantics agree | Existing v1 acceptance remains the required baseline | Phase 6 cross-executor workflow. |
-| L7. Conflict notification remains preservation-gated | Existing v1 preservation/email evidence; Mac authenticated local-runner thread/owner-email interface feasibility passed without sending email | Linux interface qualification remains pending. Preservation ordering, request deduplication, and notification execution remain Phase 6 gates on both targets. |
+| L7. Conflict notification remains preservation-gated | Existing v1 preservation/email evidence; Linux and Mac authenticated local-runner thread/owner-email interface feasibility passed without sending email | Preservation ordering, request deduplication, and notification execution remain Phase 6 gates on both targets. |
 | L8. Credentials are operation-scoped | Stable existing missing-credential codes in the contract fixture | Phase 6 credential-removal workflow, including indexed `get`. |
 | L9. Concurrent sync and telemetry remain honest | Existing v1 sync/retrieval evidence | Phase 6 delayed cross-executor sync and uncertain-COMMIT workflow. |
 | L10. Generated instructions are consumer-only | Fresh-0.2 source-free inventory fixture | Phase 4 generated-template audit and golden tests. |

@@ -11,15 +11,27 @@
     },
     {
       "name": "local_linux_direct_install",
-      "state": "pending_non_orb_runner",
+      "state": "candidate_pending_ordinary_update",
       "executor": "local",
       "amp_path_shape": "$HOME/.amp/bin/amp",
-      "clone_helper_shape": "credential.https://ampcode.com.helper=!amp git-credential-helper",
-      "clone_use_http_path": true,
+      "path_entry_shape": "$HOME/.local/bin/amp -> $HOME/.amp/bin/amp",
+      "observed_amp_version": "0.0.1789113641-gcd8b8a",
+      "observed_amp_sha256": "b85abf99057ee68be28be6867d2032611d303a3fa6fddaee1d6c2b2d22234185",
+      "official_checksum_matched": true,
+      "amp_clone_existing_project": "passed_user_skills_read_only",
+      "clone_origin_shape": "https://ampcode.com/git/@<owner>/-/skills",
+      "clone_repository_helper": "unset",
+      "clone_effective_helper_shape": "!amp git-credential-helper",
+      "clone_use_http_path": false,
       "clone_writes_repository_author": false,
-      "minimum_observed_amp_version": "0.0.1789099241-gef9fd5",
-      "credential_environment_state": "provisional_pending_non_orb_runner",
-      "provisional_environment_allowlist": ["HOME", "XDG_CONFIG_HOME", "LANG", "LC_ALL"],
+      "minimum_supported_amp_version": "0.0.1789113641-gcd8b8a",
+      "qualified_explicit_helper_shape": "!$HOME/.amp/bin/amp git-credential-helper",
+      "qualified_use_http_path": true,
+      "credential_environment_state": "qualified_minimal_read_only",
+      "credential_environment_allowlist": ["HOME", "PATH", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_TERMINAL_PROMPT"],
+      "local_runner_thread_identity": "qualified_authenticated_context",
+      "local_runner_owner_email_capability": "qualified_interface_no_email_sent",
+      "ordinary_update_state": "pending_no_authoritative_prior_executable_identity",
       "persisted_secret": false
     },
     {
@@ -30,6 +42,7 @@
       "path_entry_shape": "$HOME/.local/bin/amp -> $HOME/.amp/bin/amp",
       "observed_amp_version": "0.0.1789113641-gcd8b8a",
       "observed_amp_sha256": "3c9371af1bed55f8fec8f03fe72f0e06f9aec97f671ee2338e131d1fb938d37d",
+      "minimum_supported_amp_version": "0.0.1789113641-gcd8b8a",
       "official_checksum_matched": true,
       "amp_clone_existing_project": "passed_user_skills_read_only",
       "clone_origin_shape": "https://ampcode.com/git/@<owner>/-/skills",
@@ -101,10 +114,21 @@
     {"name": "stale_enrollment", "target": "linux-x86_64", "expected_code": "local_amp_changed"}
   ],
   "capability_gates": [
-    {"capability": "authenticated_current_thread_identity", "linux": "pending_non_orb_runner", "macos": "passed_authenticated_local_runner_context"},
-    {"capability": "current_thread_owner_email", "linux": "pending_non_orb_runner", "macos": "passed_owner_bound_interface_no_delivery_attempt"},
-    {"capability": "disposable_postgresql_pgvector", "linux": "pending_non_orb_runner", "macos": "passed_postgresql_15_19_pgvector_0_8_1"}
+    {"capability": "authenticated_current_thread_identity", "linux": "passed_authenticated_local_runner_context", "macos": "passed_authenticated_local_runner_context"},
+    {"capability": "current_thread_owner_email", "linux": "passed_owner_bound_interface_no_delivery_attempt", "macos": "passed_owner_bound_interface_no_delivery_attempt"},
+    {"capability": "disposable_postgresql_pgvector", "linux": "passed_postgresql_15_19_pgvector_0_8_1", "macos": "passed_postgresql_15_19_pgvector_0_8_1"}
   ],
+  "linux_native_observations": {
+    "os": "Arch Linux rolling",
+    "kernel": "7.2.3-arch1-3",
+    "architecture": "x86_64",
+    "libc": "glibc 2.44",
+    "filesystem": "local ext4",
+    "ext4_primitives": ["file_fsync", "directory_fsync", "flock", "hard_link_identity", "nofollow", "descriptor_relative_operations", "rename_noreplace", "rename_exchange", "exchange_rollback", "retained_parent_replacement_detection"],
+    "database_harness": "private_unix_socket_postgresql_15_19_pgvector_0_8_1",
+    "migrations_applied": ["0001_enable_vector.sql", "0002_application_schema.sql"],
+    "tool_observations": ["bash=5.3.15", "git=2.55.0", "curl=8.22.0-openssl=3.6.4", "python3=3.14.7-strict-wrapper-passed", "gnu-tar=1.35", "sha256sum=9.11", "rg=15.2.0"]
+  },
   "macos_native_observations": {
     "os": "macOS 26.5.2 build 25F84",
     "architecture": "arm64",

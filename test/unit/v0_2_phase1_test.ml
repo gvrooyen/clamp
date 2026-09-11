@@ -642,7 +642,8 @@ let target_and_environment_fixtures () =
   exact_keys "environment fixture keys"
     [ "schema_version"; "auth_contexts"; "release_targets";
       "local_configuration_cases"; "runtime_metadata_cases";
-      "capability_gates"; "macos_native_observations";
+      "capability_gates"; "linux_native_observations";
+      "macos_native_observations";
       "compatibility_gates" ]
     environment_fixture;
   Alcotest.(check int) "schema" 1
@@ -662,6 +663,43 @@ let target_and_environment_fixtures () =
       Alcotest.(check bool) (string "name" value ^ " stores no secret") false
         (bool "persisted_secret" value))
     auth;
+  let linux_auth =
+    List.find (fun value -> string "name" value = "local_linux_direct_install")
+      auth
+  in
+  Alcotest.(check string) "Linux aggregate state"
+    "candidate_pending_ordinary_update" (string "state" linux_auth);
+  Alcotest.(check string) "Linux read-only clone qualification"
+    "passed_user_skills_read_only"
+    (string "amp_clone_existing_project" linux_auth);
+  Alcotest.(check string) "Linux Amp minimum"
+    "0.0.1789113641-gcd8b8a"
+    (string "minimum_supported_amp_version" linux_auth);
+  Alcotest.(check string) "Linux observed Amp version"
+    "0.0.1789113641-gcd8b8a" (string "observed_amp_version" linux_auth);
+  Alcotest.(check string) "Linux observed Amp digest"
+    "b85abf99057ee68be28be6867d2032611d303a3fa6fddaee1d6c2b2d22234185"
+    (string "observed_amp_sha256" linux_auth);
+  Alcotest.(check bool) "Linux official checksum matched" true
+    (bool "official_checksum_matched" linux_auth);
+  Alcotest.(check string) "Linux observed helper"
+    "!amp git-credential-helper" (string "clone_effective_helper_shape" linux_auth);
+  Alcotest.(check bool) "Linux observed helper omits HTTP path" false
+    (bool "clone_use_http_path" linux_auth);
+  Alcotest.(check bool) "Linux clone writes no author" false
+    (bool "clone_writes_repository_author" linux_auth);
+  Alcotest.(check string) "Linux qualified absolute helper"
+    "!$HOME/.amp/bin/amp git-credential-helper"
+    (string "qualified_explicit_helper_shape" linux_auth);
+  Alcotest.(check bool) "Linux qualified helper uses HTTP path" true
+    (bool "qualified_use_http_path" linux_auth);
+  Alcotest.(check (list string)) "Linux helper environment allowlist"
+    [ "HOME"; "PATH"; "GIT_CONFIG_NOSYSTEM"; "GIT_CONFIG_GLOBAL";
+      "GIT_TERMINAL_PROMPT" ]
+    (member "credential_environment_allowlist" linux_auth |> strings);
+  Alcotest.(check string) "Linux ordinary update remains pending"
+    "pending_no_authoritative_prior_executable_identity"
+    (string "ordinary_update_state" linux_auth);
   let mac_auth =
     List.find (fun value -> string "name" value = "local_macos_arm64") auth
   in
@@ -670,6 +708,9 @@ let target_and_environment_fixtures () =
   Alcotest.(check string) "Mac read-only clone qualification"
     "passed_user_skills_read_only"
     (string "amp_clone_existing_project" mac_auth);
+  Alcotest.(check string) "Mac Amp minimum"
+    "0.0.1789113641-gcd8b8a"
+    (string "minimum_supported_amp_version" mac_auth);
   Alcotest.(check string) "Mac helper is reconstructed explicitly"
     "!amp git-credential-helper" (string "clone_effective_helper_shape" mac_auth);
   Alcotest.(check string) "Mac qualified absolute helper"
@@ -741,12 +782,15 @@ let target_and_environment_fixtures () =
     [ "authenticated_current_thread_identity"; "current_thread_owner_email";
       "disposable_postgresql_pgvector" ]
     (List.map (string "capability") capabilities);
-  List.iter
-    (fun name ->
-      Alcotest.(check string) (name ^ " Linux pending")
-        "pending_non_orb_runner" (capability name "linux"))
-    [ "authenticated_current_thread_identity"; "current_thread_owner_email";
-      "disposable_postgresql_pgvector" ];
+  Alcotest.(check string) "Linux identity interface passed"
+    "passed_authenticated_local_runner_context"
+    (capability "authenticated_current_thread_identity" "linux");
+  Alcotest.(check string) "Linux owner email interface passed"
+    "passed_owner_bound_interface_no_delivery_attempt"
+    (capability "current_thread_owner_email" "linux");
+  Alcotest.(check string) "Linux database feasibility passed"
+    "passed_postgresql_15_19_pgvector_0_8_1"
+    (capability "disposable_postgresql_pgvector" "linux");
   Alcotest.(check string) "Mac identity interface passed"
     "passed_authenticated_local_runner_context"
     (capability "authenticated_current_thread_identity" "macos");
@@ -756,6 +800,35 @@ let target_and_environment_fixtures () =
   Alcotest.(check string) "Mac database feasibility passed"
     "passed_postgresql_15_19_pgvector_0_8_1"
     (capability "disposable_postgresql_pgvector" "macos");
+  let linux_native = member "linux_native_observations" environment_fixture in
+  exact_keys "Linux native observation keys"
+    [ "os"; "kernel"; "architecture"; "libc"; "filesystem";
+      "ext4_primitives"; "database_harness"; "migrations_applied";
+      "tool_observations" ]
+    linux_native;
+  Alcotest.(check (list string)) "Linux environment"
+    [ "Arch Linux rolling"; "7.2.3-arch1-3"; "x86_64"; "glibc 2.44";
+      "local ext4" ]
+    [ string "os" linux_native; string "kernel" linux_native;
+      string "architecture" linux_native; string "libc" linux_native;
+      string "filesystem" linux_native ];
+  Alcotest.(check (list string)) "required ext4 primitives"
+    [ "file_fsync"; "directory_fsync"; "flock"; "hard_link_identity";
+      "nofollow"; "descriptor_relative_operations"; "rename_noreplace";
+      "rename_exchange"; "exchange_rollback";
+      "retained_parent_replacement_detection" ]
+    (member "ext4_primitives" linux_native |> strings);
+  Alcotest.(check string) "Linux disposable database harness"
+    "private_unix_socket_postgresql_15_19_pgvector_0_8_1"
+    (string "database_harness" linux_native);
+  Alcotest.(check (list string)) "Linux migrations exercised"
+    [ "0001_enable_vector.sql"; "0002_application_schema.sql" ]
+    (member "migrations_applied" linux_native |> strings);
+  Alcotest.(check (list string)) "Linux native tool observations"
+    [ "bash=5.3.15"; "git=2.55.0"; "curl=8.22.0-openssl=3.6.4";
+      "python3=3.14.7-strict-wrapper-passed"; "gnu-tar=1.35";
+      "sha256sum=9.11"; "rg=15.2.0" ]
+    (member "tool_observations" linux_native |> strings);
   let native = member "macos_native_observations" environment_fixture in
   exact_keys "macOS native observation keys"
     [ "os"; "architecture"; "translated"; "apfs_primitives";

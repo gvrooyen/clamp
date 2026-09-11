@@ -174,7 +174,7 @@ The target matrix is gated rather than inferred from Amp CLI support:
 
 | Target | 0.2.0 state | Required qualification |
 | --- | --- | --- |
-| Linux x86-64, glibc 2.36 or newer, local ext4 | Candidate | A clean non-Orb local Amp runner must pass the helper, filesystem, package, database-client, and end-to-end gates. |
+| Linux x86-64, glibc 2.36 or newer, local ext4 | Candidate | Native non-Orb testing passed ext4 primitives, source-free consumer bootstrap, an exact-project Amp clone with isolated authenticated read-only Git, authenticated local-runner thread/owner-email interfaces, and a private PostgreSQL 15.19/pgvector 0.8.1 harness. Support remains gated on ordinary-update requalification plus later runtime/package, durability, and end-to-end evidence. |
 | Apple-silicon macOS 26.5.2 or newer | Candidate | Native macOS 26.5.2 arm64 testing passed local writable case-insensitive APFS primitives, source-free consumer bootstrap, an exact-project Amp clone with isolated authenticated read-only Git, authenticated local-runner thread/owner-email interfaces, and a private PostgreSQL 15.19/pgvector 0.8.1 harness. No support is inferred for older macOS, and support remains gated on ordinary-update requalification plus later native runtime/package, signing, durability, and end-to-end evidence. |
 
 Every other architecture, operating system, Linux libc, and filesystem is
@@ -187,7 +187,7 @@ its named native gates pass. A target may be deferred without delaying Linux,
 but release documentation and artifacts must then omit it consistently.
 
 The Linux bootstrap prerequisite floor is fixed at: the official direct Amp
-CLI installation with version `0.0.1789099241-gef9fd5` or newer at the qualified
+CLI installation with version `0.0.1789113641-gcd8b8a` or newer at the qualified
 `$HOME/.amp/bin/amp` layout; Bash 5.2; Git 2.39; curl 7.88.1; Python 3.11 for
 strict JSON manifest parsing and archive inspection; GNU tar 1.34; GNU
 coreutils 9.1 `sha256sum` with binary-file checking; and ripgrep 14.1. The
@@ -200,7 +200,8 @@ prerequisite without invoking a package manager. The macOS floors are Bash
 non-finite, UTF-8, depth, node, size, and numeric rejection wrapper; bsdtar
 3.5.3/libarchive 3.7.4; `shasum` 6.02; and ripgrep 14.1.1. Opam, OCaml, Dune,
 and PostgreSQL are build/test inputs, not source-free consumer prerequisites.
-The candidate Amp layout is the official-
+Both candidates require Amp `0.0.1789113641-gcd8b8a` or newer. The candidate
+Mac Amp layout is the official-
 checksum-matched arm64 executable at `$HOME/.amp/bin/amp`, reached on the tested
 host by the `$HOME/.local/bin/amp` symlink. The observed helper configuration
 differs from the Orb observation. On the tested Mac,
@@ -212,9 +213,9 @@ read-only exact-origin operation under only `HOME`, `PATH`,
 Ordinary-update behavior remains unqualified and requires target-specific
 evidence.
 
-The authenticated Mac runner context supplied exact current-thread ID/URL,
-current-user identity, and Amp's owner-bound `send_email` capability. This
-qualifies the local-executor interface decision: the skill retains the
+The authenticated Linux and Mac runner contexts supplied exact current-thread
+ID/URL, current-user identity, and Amp's owner-bound `send_email` capability.
+This qualifies the local-executor interface decision: the skill retains the
 authenticated thread identity in memory, passes it to `kb publish`, and invokes
 email only after durable preservation. It does not make environment variables
 authoritative. Actual conflict notification, deduplication, and delivery remain
@@ -305,10 +306,10 @@ generic helpers, askpass, hooks, includes, proxies, rewrites, and unrelated Amp
 or service variables are removed before credentials are exposed. Credentials
 never enter argv, output, persisted files, or email. Setup proves the helper can
 read the exact origin through a bounded non-mutating remote operation. The
-Linux allowlist is provisional (`HOME`, `XDG_CONFIG_HOME`, `LANG`, and `LC_ALL`)
-until the non-Orb runner proves the official credential store needs no other
-input; macOS receives its own native-qualified allowlist rather than inheriting
-Linux assumptions.
+native-qualified Linux and Mac helper environment is limited to `HOME`, `PATH`,
+`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL`, and `GIT_TERMINAL_PROMPT`; each
+target retains its separately observed helper configuration rather than
+inheriting the other target's assumptions.
 
 Local `kb publish` preserves the v1 managed-file, clean-history, non-force,
 rebase, retry, exact-pushed-commit synchronization, preservation, and stale-
