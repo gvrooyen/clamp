@@ -24,7 +24,7 @@
     },
     {
       "name": "local_macos_arm64",
-      "state": "candidate_pending_amp_project",
+      "state": "candidate_pending_ordinary_update",
       "executor": "local",
       "amp_path_shape": "$HOME/.amp/bin/amp",
       "path_entry_shape": "$HOME/.local/bin/amp -> $HOME/.amp/bin/amp",
@@ -35,12 +35,14 @@
       "clone_origin_shape": "https://ampcode.com/git/@<owner>/-/skills",
       "clone_repository_helper": "unset",
       "clone_effective_helper_shape": "!amp git-credential-helper",
+      "qualified_explicit_helper_shape": "!$HOME/.amp/bin/amp git-credential-helper",
       "clone_use_http_path": false,
       "clone_writes_repository_author": false,
       "credential_environment_state": "qualified_minimal_read_only",
       "credential_environment_allowlist": ["HOME", "PATH", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_TERMINAL_PROMPT"],
-      "standalone_thread_identity": "pending_not_advertised_by_amp_tools",
-      "owner_email_capability": "pending_not_advertised_by_amp_tools",
+      "local_runner_thread_identity": "qualified_authenticated_context",
+      "local_runner_owner_email_capability": "qualified_interface_no_email_sent",
+      "ordinary_update_state": "pending_no_authoritative_prior_executable_identity",
       "persisted_secret": false
     }
   ],
@@ -63,9 +65,17 @@
     {
       "target": "macos-arm64",
       "state": "candidate",
-      "minimum_os": null,
+      "minimum_os": "macOS 26.5.2",
       "filesystems": ["local writable case-insensitive APFS"],
-      "bootstrap": []
+      "bootstrap": [
+        "bash>=3.2.57-without-mapfile-or-associative-arrays",
+        "git>=2.50.1-Apple-Git-155",
+        "curl>=8.7.1",
+        "python3>=3.9.6-strict-json-wrapper",
+        "bsdtar>=3.5.3-libarchive>=3.7.4",
+        "shasum>=6.02",
+        "rg>=14.1.1"
+      ]
     }
   ],
   "local_configuration_cases": [
@@ -91,8 +101,8 @@
     {"name": "stale_enrollment", "target": "linux-x86_64", "expected_code": "local_amp_changed"}
   ],
   "capability_gates": [
-    {"capability": "authenticated_current_thread_identity", "linux": "pending_non_orb_runner", "macos": "pending_local_executor_integration"},
-    {"capability": "current_thread_owner_email", "linux": "pending_non_orb_runner", "macos": "pending_standalone_interface"},
+    {"capability": "authenticated_current_thread_identity", "linux": "pending_non_orb_runner", "macos": "passed_authenticated_local_runner_context"},
+    {"capability": "current_thread_owner_email", "linux": "pending_non_orb_runner", "macos": "passed_owner_bound_interface_no_delivery_attempt"},
     {"capability": "disposable_postgresql_pgvector", "linux": "pending_non_orb_runner", "macos": "passed_postgresql_15_19_pgvector_0_8_1"}
   ],
   "macos_native_observations": {
@@ -102,9 +112,11 @@
     "apfs_primitives": ["directory_fsync", "file_fullfsync", "flock", "hard_link_identity", "nofollow", "retained_descriptor", "descriptor_relative_unlink", "rename_exclusive", "rename_exchange", "exchange_rollback"],
     "database_harness": "private_unix_socket_postgresql_15_19_pgvector_0_8_1",
     "migrations_applied": ["0001_enable_vector.sql", "0002_application_schema.sql"],
-    "tool_observations": ["bash=3.2.57-no-mapfile", "git=2.50.1-Apple-Git-155", "curl=8.7.1", "python3=3.9.6-requires-strict-json-wrapper", "bsdtar=3.5.3", "shasum=6.02", "rg=missing"],
+    "tool_observations": ["bash=3.2.57-no-mapfile-or-associative-arrays", "git=2.50.1-Apple-Git-155", "curl=8.7.1", "python3=3.9.6-strict-wrapper-passed", "bsdtar=3.5.3-libarchive=3.7.4", "shasum=6.02", "rg=14.1.1-arm64"],
+    "ripgrep_archive_sha256": "24ad76777745fbff131c8fbc466742b011f925bfa4fffa2ded6def23b5b937be",
+    "ripgrep_runtime_dependency": "/usr/lib/libpcre2-8.0.dylib",
     "runtime_build_state": "blocked_on_porting_linux_filesystem_and_packaging_code",
-    "ripgrep_state": "missing"
+    "ripgrep_state": "qualified_disposable_official_archive"
   },
   "compatibility_gates": [
     {

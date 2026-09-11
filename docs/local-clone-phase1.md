@@ -13,11 +13,11 @@ Status on 2026-09-11:
   observations are captured; a clean non-Orb local runner is still needed.
 - Apple-silicon macOS is now a candidate after native testing on macOS 26.5.2
   (build 25F84). Local writable case-insensitive APFS primitives and a private
-  PostgreSQL/pgvector harness passed, but the minimum OS and bootstrap closure
-  remain unset because `rg` and a native Clamp toolchain were absent. Exact Amp
-  standalone thread/owner-email interfaces, runtime porting, packaging, and
-  update requalification remain pending. A real existing-project clone and
-  isolated authenticated read-only Git operation passed.
+  PostgreSQL/pgvector harness passed. The minimum is conservatively fixed to
+  macOS 26.5.2, and the source-free consumer bootstrap and authenticated local-
+  runner thread/owner-email interfaces are qualified. Runtime porting,
+  packaging, and update requalification remain pending. A real existing-project
+  clone and isolated authenticated read-only Git operation passed.
 - Phase 1 is therefore in progress and must not be marked complete.
 
 ## Authoritative Amp documentation
@@ -65,13 +65,15 @@ Native Apple-silicon observations from runner `clamp-macos`:
 
 | Observation | Result | Contract consequence |
 | --- | --- | --- |
-| Host | macOS 26.5.2 build 25F84, native arm64, local writable case-insensitive APFS | Candidate evidence for only this exact environment; no broader minimum macOS version is inferred. |
+| Host | macOS 26.5.2 build 25F84, native arm64, local writable case-insensitive APFS | Fix 26.5.2 as the conservative minimum; do not claim support for an older macOS release from this evidence. |
 | APFS primitives | Directory `fsync`, file `F_FULLFSYNC`, descriptor `flock`, hard-link identity, no-follow traversal, retained descriptors, descriptor-relative unlink, exclusive/exchange rename, and exchange rollback passed in a disposable directory | Native filesystem implementation is feasible; application-level failure injection and abrupt-interruption tests remain with implementation. |
-| Amp installation | `$HOME/.local/bin/amp` symlink to regular arm64 Mach-O `$HOME/.amp/bin/amp`; observed version `0.0.1789113641-gcd8b8a`; bytes matched the official checksum; retained chain was not group/other writable | Candidate direct-install shape. Requalification after an ordinary update and exact installer provenance remain required. |
+| Amp installation | `$HOME/.local/bin/amp` symlink to regular arm64 Mach-O `$HOME/.amp/bin/amp`; observed version `0.0.1789113641-gcd8b8a`; bytes matched the official checksum; retained chain was not group/other writable | Candidate direct-install shape. Ordinary-update requalification must establish the prior and replacement official identities/checksums and repeat the retained-path/helper/read-only checks. |
+| Ordinary-update evidence | The current executable was unchanged throughout qualification. Bounded non-secret installation metadata and logs contained no authoritative prior executable identity; timestamps cannot distinguish update from fresh install or replacement. | Remains pending. Do not force an update or infer an update from current-file timestamps. |
 | Existing-project clone | A disposable `amp clone user-skills` succeeded with exact Amp HTTPS origin shape. Repository-local helper, `useHttpPath`, author name, and author email were unset; the effective helper was `!amp git-credential-helper` with default-false `useHttpPath`. | Mac behavior differs from the Orb observation and must have its own target contract. Publication requires the user to configure a repository-local author. |
 | Isolated authenticated Git | Read-only `ls-remote` succeeded with the absolute Amp helper, system/global Git configuration disabled, and only `HOME`, `PATH`, `GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL`, and `GIT_TERMINAL_PROMPT` retained | Freeze this Mac allowlist for the observed direct-install/helper shape; revalidate executable identity immediately before use and expose it only to exact Amp HTTPS origins. |
-| Local Amp interfaces | `amp tools list` did not advertise current-user identity, thread read/status, or owner-email tools | The runner thread's authenticated tools do not prove that standalone local Clamp can obtain the required capabilities. |
-| Native tools | Bash 3.2.57 without `mapfile`; Apple Git 2.50.1; curl 8.7.1; Python 3.9.6 requiring explicit duplicate-key/non-finite JSON rejection; bsdtar 3.5.3; `shasum` 6.02; no `rg`, Opam, OCaml, or Dune | These are observations, not frozen minimums. Portable code cannot assume GNU shell, tar, checksum, or Linux path behavior. |
+| Local Amp interfaces | The authenticated runner context supplied exact current-thread ID/URL, current-user identity, and owner-bound `send_email`; no email was sent | The existing skill model is feasible: retain thread identity in memory, pass it to `kb`, and request email only after preservation. End-to-end behavior remains a later implementation gate. `amp tools list` is not authoritative for agent server-side tools. |
+| Native tools | Bash 3.2.57 without `mapfile` or associative arrays; Apple Git 2.50.1; curl 8.7.1; strict-wrapper-tested Python 3.9.6; bsdtar 3.5.3/libarchive 3.7.4; `shasum` 6.02; authenticated disposable arm64 ripgrep 14.1.1 | Freeze these conservative consumer floors and capabilities. Opam, OCaml, Dune, and PostgreSQL are build/test inputs, not source-free consumer prerequisites. Portable code cannot assume GNU shell, tar, checksum, or Linux path behavior. |
+| Ripgrep artifact | Publisher-adjacent SHA-256 `24ad76777745fbff131c8fbc466742b011f925bfa4fffa2ded6def23b5b937be`; native arm64 execution passed Unicode JSON output, literal hostile path names, no-match exit 1, invalid-regex exit 2, and system PCRE2 resolution | Require ripgrep 14.1.1 or newer and preflight its behavior; the artifact's Mach-O minimum does not broaden Clamp's supported macOS floor. |
 | Disposable database | PostgreSQL 15.19 and pinned pgvector 0.8.1 built as arm64, ran on a private Unix socket with TCP disabled, applied both migrations, and passed vector/HNSW checks | Native database integration is feasible without an ambient production URL. |
 | Existing Clamp source | Current filesystem C stubs, linker/RPATH, release builder, and setup paths are Linux-specific | Porting belongs to the later native-runtime phase; Phase 1 must not claim a Mac runtime exists. |
 
@@ -84,9 +86,9 @@ or local helper environment.
 Before implementation begins, Phase 1 must:
 
 1. Run the local Amp helper/layout/update/thread-identity/email checks below on
-   a clean non-Orb Linux runner. On Mac, complete the ordinary-update,
-   local-executor thread/owner-notification capability decision, and consumer
-   bootstrap qualification left pending by the native passes.
+   a clean non-Orb Linux runner. On Mac, complete only ordinary-update
+   requalification; local-executor thread/owner-notification feasibility and
+   consumer bootstrap qualification passed in the native runner.
 2. Freeze each retained target's minimum OS, filesystem, exact source-free
    consumer bootstrap tools and versions, exact local Amp environment
    allowlist, and disposable PostgreSQL/pgvector feasibility harness from
@@ -124,15 +126,19 @@ artifacts.
 2. Run real `amp clone` without Orb authentication variables. Record the exact
    origin shape and scoped helper configuration, then prove bounded
    noninteractive `get` and read-only `ls-remote` under Clamp's proposed
-   allowlisted environment. Repeat missing-login, timeout, malformed-output,
-   update, and path-replacement cases without retaining helper output.
+   allowlisted environment. This successful native path and the ordinary-update
+   observation qualify Phase 1. Missing-login, timeout, malformed-output, and
+   path-replacement failure injection execute after the Phase 5 helper
+   implementation and must not retain helper output.
 3. Confirm whether clone writes repository-local `user.name` and `user.email`.
 4. Start a local Amp thread in the clone and prove authenticated current-thread
    ID/URL and current-thread-owner email capability. Send at most one test
    request to the authenticated test owner after explicit approval; do not use
    an inferred identity or external email provider.
-The first four steps qualify Phase 1 behavior and environment assumptions. The
-following steps execute after their owning implementation phase:
+The successful native portions of the first four steps qualify Phase 1
+environment and capability assumptions. Failure injection and end-to-end
+effects execute after their owning implementation phase. The following steps
+are also later gates:
 
 5. Exercise every required secure-filesystem primitive and durability failure
    on the target filesystem, including parent-directory sync, locks, hard

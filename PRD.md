@@ -175,7 +175,7 @@ The target matrix is gated rather than inferred from Amp CLI support:
 | Target | 0.2.0 state | Required qualification |
 | --- | --- | --- |
 | Linux x86-64, glibc 2.36 or newer, local ext4 | Candidate | A clean non-Orb local Amp runner must pass the helper, filesystem, package, database-client, and end-to-end gates. |
-| Apple-silicon macOS | Candidate | Native macOS 26.5.2 arm64 testing passed local writable case-insensitive APFS primitives, an exact-project Amp clone with isolated authenticated read-only Git, and a private PostgreSQL 15.19/pgvector 0.8.1 harness. No broader minimum OS is inferred, and support remains gated on ordinary-update requalification, standalone thread/email, prerequisite closure, native runtime/package, signing, and end-to-end evidence. |
+| Apple-silicon macOS 26.5.2 or newer | Candidate | Native macOS 26.5.2 arm64 testing passed local writable case-insensitive APFS primitives, source-free consumer bootstrap, an exact-project Amp clone with isolated authenticated read-only Git, authenticated local-runner thread/owner-email interfaces, and a private PostgreSQL 15.19/pgvector 0.8.1 harness. No support is inferred for older macOS, and support remains gated on ordinary-update requalification plus later native runtime/package, signing, durability, and end-to-end evidence. |
 
 Every other architecture, operating system, Linux libc, and filesystem is
 unsupported for 0.2.0 unless deliberately added to this table with equivalent
@@ -194,12 +194,13 @@ coreutils 9.1 `sha256sum` with binary-file checking; and ripgrep 14.1. The
 pre-`kb` bootstrap parser is Python's standard `json` module invoked with
 Python 3.11 under a sanitized environment; no `jq` or YAML parser is assumed.
 Setup checks versions and capabilities before download and reports a missing
-prerequisite without invoking a package manager. macOS prerequisite versions
-remain blocked on Phase 1 qualification and must not be copied from the Linux
-values. The observed Mac supplied Bash 3.2 without `mapfile`, Apple Git, curl,
-Python requiring explicit duplicate-key/non-finite JSON rejection, bsdtar, and
-`shasum`, but lacked `rg` and the native Clamp toolchain. These observations are
-not frozen compatibility floors. The candidate Amp layout is the official-
+prerequisite without invoking a package manager. The macOS floors are Bash
+3.2.57 without `mapfile` or associative-array requirements; Apple Git 2.50.1
+(Apple Git-155); curl 8.7.1; Python 3.9.6 with Clamp's strict duplicate-key,
+non-finite, UTF-8, depth, node, size, and numeric rejection wrapper; bsdtar
+3.5.3/libarchive 3.7.4; `shasum` 6.02; and ripgrep 14.1.1. Opam, OCaml, Dune,
+and PostgreSQL are build/test inputs, not source-free consumer prerequisites.
+The candidate Amp layout is the official-
 checksum-matched arm64 executable at `$HOME/.amp/bin/amp`, reached on the tested
 host by the `$HOME/.local/bin/amp` symlink. The observed helper configuration
 differs from the Orb observation. On the tested Mac,
@@ -210,6 +211,14 @@ read-only exact-origin operation under only `HOME`, `PATH`,
 `GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL`, and `GIT_TERMINAL_PROMPT`.
 Ordinary-update behavior remains unqualified and requires target-specific
 evidence.
+
+The authenticated Mac runner context supplied exact current-thread ID/URL,
+current-user identity, and Amp's owner-bound `send_email` capability. This
+qualifies the local-executor interface decision: the skill retains the
+authenticated thread identity in memory, passes it to `kb publish`, and invokes
+email only after durable preservation. It does not make environment variables
+authoritative. Actual conflict notification, deduplication, and delivery remain
+later end-to-end implementation gates; no qualification email was sent.
 
 ### Portable repository and scaffold ownership
 

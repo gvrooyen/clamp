@@ -165,10 +165,10 @@ requiring PRD review and migration/reindex planning.
 **Status: in progress.** The repository-owned contract, sanitized fixtures,
 tests, and immutable-0.1.4 prepublication compatibility mechanism are
 implemented and Oracle-reviewed with no repository-owned blockers. Native
-non-Orb Linux gates and the remaining Apple-silicon macOS consumer-bootstrap,
-ordinary-update, and local-executor identity/notification decisions remain
-pending. Native Mac APFS, isolated authenticated read-only Amp Git, and
-disposable database feasibility have passed. Native runtime/package,
+non-Orb Linux gates and Apple-silicon macOS ordinary-update requalification
+remain pending. Native Mac APFS, source-free consumer bootstrap, isolated
+authenticated read-only Amp Git, local-runner identity/notification interfaces,
+and disposable database feasibility have passed. Native runtime/package,
 application durability, signing, and end-to-end work remain later-phase gates,
 not Phase 1 prerequisites. Phase 1 is not complete and no local target is
 supported yet.

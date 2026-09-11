@@ -665,11 +665,16 @@ let target_and_environment_fixtures () =
   let mac_auth =
     List.find (fun value -> string "name" value = "local_macos_arm64") auth
   in
+  Alcotest.(check string) "Mac aggregate state"
+    "candidate_pending_ordinary_update" (string "state" mac_auth);
   Alcotest.(check string) "Mac read-only clone qualification"
     "passed_user_skills_read_only"
     (string "amp_clone_existing_project" mac_auth);
   Alcotest.(check string) "Mac helper is reconstructed explicitly"
     "!amp git-credential-helper" (string "clone_effective_helper_shape" mac_auth);
+  Alcotest.(check string) "Mac qualified absolute helper"
+    "!$HOME/.amp/bin/amp git-credential-helper"
+    (string "qualified_explicit_helper_shape" mac_auth);
   Alcotest.(check bool) "Mac helper does not use HTTP path" false
     (bool "clone_use_http_path" mac_auth);
   Alcotest.(check bool) "Mac clone writes no author" false
@@ -678,6 +683,9 @@ let target_and_environment_fixtures () =
     [ "HOME"; "PATH"; "GIT_CONFIG_NOSYSTEM"; "GIT_CONFIG_GLOBAL";
       "GIT_TERMINAL_PROMPT" ]
     (member "credential_environment_allowlist" mac_auth |> strings);
+  Alcotest.(check string) "Mac ordinary update remains pending"
+    "pending_no_authoritative_prior_executable_identity"
+    (string "ordinary_update_state" mac_auth);
   let targets = member "release_targets" environment_fixture |> records in
   Alcotest.(check (list string)) "exact target set"
     [ "linux-x86_64"; "macos-arm64" ] (List.map (string "target") targets);
@@ -697,13 +705,18 @@ let target_and_environment_fixtures () =
     (member "bootstrap" linux |> strings);
   Alcotest.(check string) "macOS candidate" "candidate"
     (string "state" mac);
-  Alcotest.(check bool) "macOS minimum remains unfrozen" true
-    (member "minimum_os" mac = `Null);
+  Alcotest.(check string) "macOS conservative minimum" "macOS 26.5.2"
+    (string "minimum_os" mac);
   Alcotest.(check (list string)) "macOS APFS qualification"
     [ "local writable case-insensitive APFS" ]
     (member "filesystems" mac |> strings);
-  Alcotest.(check (list string)) "macOS prerequisite contract remains pending"
-    [] (member "bootstrap" mac |> strings);
+  Alcotest.(check (list string)) "macOS consumer bootstrap closure"
+    [ "bash>=3.2.57-without-mapfile-or-associative-arrays";
+      "git>=2.50.1-Apple-Git-155"; "curl>=8.7.1";
+      "python3>=3.9.6-strict-json-wrapper";
+      "bsdtar>=3.5.3-libarchive>=3.7.4"; "shasum>=6.02";
+      "rg>=14.1.1" ]
+    (member "bootstrap" mac |> strings);
   let contracts = fixture "contracts.json" |> member "contracts" |> records in
   let codes = contract_codes contracts in
   let cases =
@@ -734,11 +747,11 @@ let target_and_environment_fixtures () =
         "pending_non_orb_runner" (capability name "linux"))
     [ "authenticated_current_thread_identity"; "current_thread_owner_email";
       "disposable_postgresql_pgvector" ];
-  Alcotest.(check string) "Mac identity pending"
-    "pending_local_executor_integration"
+  Alcotest.(check string) "Mac identity interface passed"
+    "passed_authenticated_local_runner_context"
     (capability "authenticated_current_thread_identity" "macos");
-  Alcotest.(check string) "Mac owner email pending"
-    "pending_standalone_interface"
+  Alcotest.(check string) "Mac owner email interface passed"
+    "passed_owner_bound_interface_no_delivery_attempt"
     (capability "current_thread_owner_email" "macos");
   Alcotest.(check string) "Mac database feasibility passed"
     "passed_postgresql_15_19_pgvector_0_8_1"
@@ -747,6 +760,7 @@ let target_and_environment_fixtures () =
   exact_keys "macOS native observation keys"
     [ "os"; "architecture"; "translated"; "apfs_primitives";
       "database_harness"; "migrations_applied"; "tool_observations";
+      "ripgrep_archive_sha256"; "ripgrep_runtime_dependency";
       "runtime_build_state"; "ripgrep_state" ]
     native;
   Alcotest.(check string) "exact observed macOS" "macOS 26.5.2 build 25F84"
@@ -766,11 +780,17 @@ let target_and_environment_fixtures () =
     [ "0001_enable_vector.sql"; "0002_application_schema.sql" ]
     (member "migrations_applied" native |> strings);
   Alcotest.(check (list string)) "native tool observations"
-    [ "bash=3.2.57-no-mapfile"; "git=2.50.1-Apple-Git-155";
-      "curl=8.7.1"; "python3=3.9.6-requires-strict-json-wrapper";
-      "bsdtar=3.5.3"; "shasum=6.02"; "rg=missing" ]
+    [ "bash=3.2.57-no-mapfile-or-associative-arrays";
+      "git=2.50.1-Apple-Git-155"; "curl=8.7.1";
+      "python3=3.9.6-strict-wrapper-passed";
+      "bsdtar=3.5.3-libarchive=3.7.4"; "shasum=6.02";
+      "rg=14.1.1-arm64" ]
     (member "tool_observations" native |> strings);
-  Alcotest.(check string) "ripgrep remains unavailable" "missing"
+  Alcotest.(check string) "ripgrep archive identity"
+    "24ad76777745fbff131c8fbc466742b011f925bfa4fffa2ded6def23b5b937be"
+    (string "ripgrep_archive_sha256" native);
+  Alcotest.(check string) "ripgrep is qualified"
+    "qualified_disposable_official_archive"
     (string "ripgrep_state" native);
   let compatibility = member "compatibility_gates" environment_fixture |> records in
   Alcotest.(check int) "one compatibility protocol" 1
