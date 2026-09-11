@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "sanitized_initial_0_1_4_example": {
+    "tag": "v0.1.4",
+    "tag_commit": "75b5c6a9ec63374b5953b8035768388055448738",
+    "source_repository": "local.test/clamp-fixture",
+    "runtime_archive": "clamp-0.1.4-linux-x86_64.tar.gz",
+    "runtime_archive_sha256": "f4b9cfbb6736def71eb5c54acae955cfe19b1e03cf519aa4616cad5dd6a53841",
+    "runtime_lock_sha256": "dca0587937628d3a021e03a28ddde925f061a6a0841de31ea97dc88168e69ea6",
+    "config_sha256": "daf56f515594d688859a794af28834133fdc978b9aff49382bb20c79beacb098",
+    "empty_todo_sha256": "f66ca03ce537ce801608d712d750f05e609e68c986bbb97be089446d11fdca95",
+    "empty_directories": [
+      "knowledge/decisions",
+      "knowledge/facts",
+      "knowledge/journal",
+      "knowledge/people",
+      "knowledge/preferences",
+      "knowledge/projects",
+      "knowledge/tasks"
+    ]
+  },
+  "migration_identity_0_1_4": {
+    "replaceable_scaffold": [
+      {"path": ".agents/resume", "git_mode": "100755", "initializer_mode": "0700", "git_blob_sha1": "c2ffc1cf437ec9269c01c5e8e077667dd2e0a800", "sha256": "4dbcaa05812ebd0ff016e3efbdf329c5466c9ee24edf62dc1c14b7a62a0bc5cb"},
+      {"path": ".agents/setup", "git_mode": "100755", "initializer_mode": "0700", "git_blob_sha1": "bd45c5a2f69e7e8039052a2f05f6dfb7958e69c3", "sha256": "1155bfedbf08b8a76e185e5a324ac6b07270bf650a01da21dab014dfef1f345c"},
+      {"path": ".agents/skills/managing-clamp-knowledge/SKILL.md", "git_mode": "100644", "initializer_mode": "0600", "git_blob_sha1": "dbd957844d6b0f2ea36b7ced90e2971e6d3e32ac", "sha256": "c18b36a55792ca8b8504aac6e083cc474df79f7f37140b55d3dde1e0c33af4a4"},
+      {"path": ".gitignore", "git_mode": "100644", "initializer_mode": "0600", "git_blob_sha1": "4eaf0a30c8317611d0077870daff24013d34b006", "sha256": "3f542922e7680145916cfcf9e48a8eb149880630a90ec71bb59df19ae5d1c15d"},
+      {"path": "AGENTS.md", "git_mode": "100644", "initializer_mode": "0600", "git_blob_sha1": "e1865c22f53de4744667f8992bd410d8cc8c49f8", "sha256": "f0f09d96f49ae5a0479544abcb482aeefb8b35b32c36b8700b3b82c124fb421c"},
+      {"path": "README.md", "git_mode": "100644", "initializer_mode": "0600", "git_blob_sha1": "ae2cf7581d9c073d8392470aa4bb80f74783c4a7", "sha256": "fd5180900792a9592b0749102a5ce8c19063174d3192281323ae16c15c3468da"}
+    ],
+    "validated_runtime_pin": {
+      "path": ".agents/clamp-runtime.lock",
+      "accepted_format": "v1-four-field",
+      "replacement": "v2-lock",
+      "static_content_identity_required": false
+    },
+    "preserved_owner_data": ["clamp.yaml", "TODO.md", "knowledge/**"],
+    "accepted_checkout_permissions": {
+      "regular": "effective-user-owned regular file with no group/other write bits",
+      "executable": "effective-user-owned regular file with owner execute and no group/other write bits"
+    }
+  },
+  "owner_modified_0_1_x": {
+    "base": "migration_identity_0_1_4",
+    "changed_paths": ["AGENTS.md"],
+    "mutation": "append LF, '# Owner customization', LF",
+    "replacement_sha256": "edf984fbb62a5c3f3c4c4cea59d377045469beb3467877e08ce0650b1e1ab924"
+  },
+  "fresh_0_2_expected": {
+    "source_repository": "local.test/clamp-fixture",
+    "required_files": [
+      ".agents/clamp-runtime.lock",
+      ".agents/clamp-scaffold.json",
+      ".agents/kb",
+      ".agents/resume",
+      ".agents/setup",
+      ".agents/setup-local",
+      ".agents/skills/managing-clamp-knowledge/SKILL.md",
+      ".gitignore",
+      "AGENTS.md",
+      "README.md",
+      "TODO.md",
+      "clamp.yaml"
+    ],
+    "forbidden_top_level": [
+      "_build",
+      "_opam",
+      "bin",
+      "db",
+      "dune",
+      "dune-project",
+      "lib",
+      "test"
+    ],
+    "runtime_lock_version": 2,
+    "initial_commits": 1,
+    "initial_branch": "main",
+    "remote_present": false
+  }
+}

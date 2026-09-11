@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "auth_contexts": [
+    {
+      "name": "orb_v1",
+      "state": "implemented",
+      "executor": "orb",
+      "amp_path_shape": "$HOME/.amp/bin/amp",
+      "credential_inputs": ["AMP_BIN_DIR", "AMP_API_KEY", "AMP_URL", "HOME"],
+      "persisted_secret": false
+    },
+    {
+      "name": "local_linux_direct_install",
+      "state": "pending_non_orb_runner",
+      "executor": "local",
+      "amp_path_shape": "$HOME/.amp/bin/amp",
+      "clone_helper_shape": "credential.https://ampcode.com.helper=!amp git-credential-helper",
+      "clone_use_http_path": true,
+      "clone_writes_repository_author": false,
+      "minimum_observed_amp_version": "0.0.1789099241-gef9fd5",
+      "credential_environment_state": "provisional_pending_non_orb_runner",
+      "provisional_environment_allowlist": ["HOME", "XDG_CONFIG_HOME", "LANG", "LC_ALL"],
+      "persisted_secret": false
+    },
+    {
+      "name": "local_macos_arm64",
+      "state": "candidate_pending_amp_project",
+      "executor": "local",
+      "amp_path_shape": "$HOME/.amp/bin/amp",
+      "path_entry_shape": "$HOME/.local/bin/amp -> $HOME/.amp/bin/amp",
+      "observed_amp_version": "0.0.1789113641-gcd8b8a",
+      "observed_amp_sha256": "3c9371af1bed55f8fec8f03fe72f0e06f9aec97f671ee2338e131d1fb938d37d",
+      "official_checksum_matched": true,
+      "amp_clone_existing_project": "passed_user_skills_read_only",
+      "clone_origin_shape": "https://ampcode.com/git/@<owner>/-/skills",
+      "clone_repository_helper": "unset",
+      "clone_effective_helper_shape": "!amp git-credential-helper",
+      "clone_use_http_path": false,
+      "clone_writes_repository_author": false,
+      "credential_environment_state": "qualified_minimal_read_only",
+      "credential_environment_allowlist": ["HOME", "PATH", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_TERMINAL_PROMPT"],
+      "standalone_thread_identity": "pending_not_advertised_by_amp_tools",
+      "owner_email_capability": "pending_not_advertised_by_amp_tools",
+      "persisted_secret": false
+    }
+  ],
+  "release_targets": [
+    {
+      "target": "linux-x86_64",
+      "state": "candidate",
+      "minimum_os": "Linux with glibc 2.36",
+      "filesystems": ["ext4"],
+      "bootstrap": [
+        "bash>=5.2",
+        "git>=2.39",
+        "curl>=7.88.1",
+        "python3>=3.11",
+        "gnu-tar>=1.34",
+        "sha256sum>=9.1",
+        "rg>=14.1"
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "state": "candidate",
+      "minimum_os": null,
+      "filesystems": ["local writable case-insensitive APFS"],
+      "bootstrap": []
+    }
+  ],
+  "local_configuration_cases": [
+    {"name": "missing", "descriptor": {"entry": "absent"}, "expected_code": "local_amp_missing"},
+    {"name": "malformed_json", "descriptor": {"regular_bytes": "{"}, "expected_code": "local_amp_installation_unsafe"},
+    {"name": "unknown_key", "descriptor": {"extra_key": "future"}, "expected_code": "local_amp_installation_unsafe"},
+    {"name": "oversized", "descriptor": {"size_bytes": 65537}, "expected_code": "local_amp_installation_unsafe"},
+    {"name": "symlink", "descriptor": {"entry": "symlink"}, "expected_code": "local_amp_installation_unsafe"},
+    {"name": "wrong_owner", "descriptor": {"owner": "other_uid"}, "expected_code": "local_amp_installation_unsafe"},
+    {"name": "writable_parent", "descriptor": {"parent_mode": "0770"}, "expected_code": "local_amp_installation_unsafe"},
+    {"name": "stale_executable_identity", "descriptor": {"digest": "different_valid_sha256"}, "expected_code": "local_amp_changed"},
+    {"name": "stale_amp_version", "descriptor": {"amp_version": "0.0.1"}, "expected_code": "local_amp_version_unsupported"},
+    {"name": "credential_like_value", "descriptor": {"extra_key": "token"}, "expected_code": "local_amp_installation_unsafe"}
+  ],
+  "runtime_metadata_cases": [
+    {"name": "linux_exact", "target": "linux-x86_64", "expected_code": "local_target_unqualified"},
+    {"name": "mac_pending", "target": "macos-arm64", "expected_code": "local_target_unqualified"},
+    {"name": "unknown_target", "target": "linux-arm64", "expected_code": "local_target_unsupported"},
+    {"name": "duplicate_target", "target": "linux-x86_64", "expected_code": "runtime_manifest_invalid"},
+    {"name": "unknown_manifest_key", "target": "linux-x86_64", "expected_code": "runtime_manifest_invalid"},
+    {"name": "credential_url", "target": "linux-x86_64", "expected_code": "runtime_manifest_invalid"},
+    {"name": "checksum_mismatch", "target": "linux-x86_64", "expected_code": "runtime_manifest_checksum_mismatch"},
+    {"name": "stale_enrollment", "target": "linux-x86_64", "expected_code": "local_amp_changed"}
+  ],
+  "capability_gates": [
+    {"capability": "authenticated_current_thread_identity", "linux": "pending_non_orb_runner", "macos": "pending_local_executor_integration"},
+    {"capability": "current_thread_owner_email", "linux": "pending_non_orb_runner", "macos": "pending_standalone_interface"},
+    {"capability": "disposable_postgresql_pgvector", "linux": "pending_non_orb_runner", "macos": "passed_postgresql_15_19_pgvector_0_8_1"}
+  ],
+  "macos_native_observations": {
+    "os": "macOS 26.5.2 build 25F84",
+    "architecture": "arm64",
+    "translated": false,
+    "apfs_primitives": ["directory_fsync", "file_fullfsync", "flock", "hard_link_identity", "nofollow", "retained_descriptor", "descriptor_relative_unlink", "rename_exclusive", "rename_exchange", "exchange_rollback"],
+    "database_harness": "private_unix_socket_postgresql_15_19_pgvector_0_8_1",
+    "migrations_applied": ["0001_enable_vector.sql", "0002_application_schema.sql"],
+    "tool_observations": ["bash=3.2.57-no-mapfile", "git=2.50.1-Apple-Git-155", "curl=8.7.1", "python3=3.9.6-requires-strict-json-wrapper", "bsdtar=3.5.3", "shasum=6.02", "rg=missing"],
+    "runtime_build_state": "blocked_on_porting_linux_filesystem_and_packaging_code",
+    "ripgrep_state": "missing"
+  },
+  "compatibility_gates": [
+    {
+      "name": "immutable_0_1_4_prepublication",
+      "state": "offline_initializer_qualified",
+      "proxy_private_ca_result": "failed_ca_override_after_proxy_connect",
+      "proxy_connections": ["github.com:443"],
+      "proxy_requests": [],
+      "alternative": "independently verify and extract the final legacy archive, then invoke the immutable 0.1.4 executable's explicit offline initializer with the final version, revision, public URL, archive SHA-256, and extracted runtime root",
+      "qualified_with_version": "0.1.4",
+      "qualified_archive_sha256": "f4b9cfbb6736def71eb5c54acae955cfe19b1e03cf519aa4616cad5dd6a53841",
+      "qualified_result_code": "repository_initialized"
+    }
+  ]
+}

@@ -3,9 +3,10 @@
 ## Status
 
 Clamp v1 and Phases 0–9 are implemented. Version 0.1.4 is the latest published
-production release. The blocking product and
-architecture decisions are resolved; retrieval coefficients remain tunable
-operational defaults rather than product invariants. Repository-owned
+production release. Release 0.2.0 Phase 1 contract work is in progress; no
+0.2.0 local-machine behavior is implemented or supported yet. The blocking v1
+product and architecture decisions are resolved; retrieval coefficients remain
+tunable operational defaults rather than product invariants. Repository-owned
 acceptance is local-only; production deployment and release-tag publication
 remain operator-controlled.
 
@@ -141,6 +142,307 @@ checksum, archive-layout, and extracted-size checks, verify the archive's
 version and revision markers and executable, and copy templates from that
 selected archive. They record the same exact four-field runtime lock as the
 explicit form. Local request validation happens before a release download.
+
+## Release 0.2.0 local-clone contract
+
+This section defines planned 0.2.0 behavior. It does not describe the current
+0.1.4 implementation and does not authorize a release or external operation.
+The contract becomes implementation-ready only when the Phase 1 target gates
+below have evidence in [ACCEPTANCE.md](./ACCEPTANCE.md).
+
+### Supported workflow and target gate
+
+A user first initializes and indexes a source-free Clamp assistant in an Amp
+Orb and publishes that repository to its Amp-hosted `origin/main`. On a
+supported local machine the user runs:
+
+```bash
+amp clone OWNER/PROJECT [TARGET]
+cd TARGET
+.agents/setup-local
+amp
+```
+
+Local setup installs the repository's exact runtime outside the checkout and
+verifies local readiness. It does not change tracked bytes, modify a shell
+profile, install system packages, migrate or write a remote database, request
+an embedding, synchronize, publish, or copy Amp project secrets. The tracked
+skill invokes `.agents/kb` with an explicit validated `--repo`; setup does not
+depend on changing the parent shell's `PATH`.
+
+The target matrix is gated rather than inferred from Amp CLI support:
+
+| Target | 0.2.0 state | Required qualification |
+| --- | --- | --- |
+| Linux x86-64, glibc 2.36 or newer, local ext4 | Candidate | A clean non-Orb local Amp runner must pass the helper, filesystem, package, database-client, and end-to-end gates. |
+| Apple-silicon macOS | Candidate | Native macOS 26.5.2 arm64 testing passed local writable case-insensitive APFS primitives, an exact-project Amp clone with isolated authenticated read-only Git, and a private PostgreSQL 15.19/pgvector 0.8.1 harness. No broader minimum OS is inferred, and support remains gated on ordinary-update requalification, standalone thread/email, prerequisite closure, native runtime/package, signing, and end-to-end evidence. |
+
+Every other architecture, operating system, Linux libc, and filesystem is
+unsupported for 0.2.0 unless deliberately added to this table with equivalent
+evidence. In particular, XFS, Btrfs, overlay, FUSE, NFS, SMB, and other network
+or userspace filesystems fail closed as unqualified; implementation must not
+select a nearby binary or silently reduce mutation durability. A target moves
+from candidate or pending to supported only through a reviewed PRD change after
+its named native gates pass. A target may be deferred without delaying Linux,
+but release documentation and artifacts must then omit it consistently.
+
+The Linux bootstrap prerequisite floor is fixed at: the official direct Amp
+CLI installation with version `0.0.1789099241-gef9fd5` or newer at the qualified
+`$HOME/.amp/bin/amp` layout; Bash 5.2; Git 2.39; curl 7.88.1; Python 3.11 for
+strict JSON manifest parsing and archive inspection; GNU tar 1.34; GNU
+coreutils 9.1 `sha256sum` with binary-file checking; and ripgrep 14.1. The
+pre-`kb` bootstrap parser is Python's standard `json` module invoked with
+Python 3.11 under a sanitized environment; no `jq` or YAML parser is assumed.
+Setup checks versions and capabilities before download and reports a missing
+prerequisite without invoking a package manager. macOS prerequisite versions
+remain blocked on Phase 1 qualification and must not be copied from the Linux
+values. The observed Mac supplied Bash 3.2 without `mapfile`, Apple Git, curl,
+Python requiring explicit duplicate-key/non-finite JSON rejection, bsdtar, and
+`shasum`, but lacked `rg` and the native Clamp toolchain. These observations are
+not frozen compatibility floors. The candidate Amp layout is the official-
+checksum-matched arm64 executable at `$HOME/.amp/bin/amp`, reached on the tested
+host by the `$HOME/.local/bin/amp` symlink. The observed helper configuration
+differs from the Orb observation. On the tested Mac,
+`amp clone` left repository-local helper and `useHttpPath` unset; the effective
+helper was `!amp git-credential-helper` with default-false `useHttpPath`.
+Reconstructing that helper with the validated absolute Amp path supported a
+read-only exact-origin operation under only `HOME`, `PATH`,
+`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL`, and `GIT_TERMINAL_PROMPT`.
+Ordinary-update behavior remains unqualified and requires target-specific
+evidence.
+
+### Portable repository and scaffold ownership
+
+Generated 0.2 repositories remain source-free. Tracked runtime metadata,
+portable setup scripts, `.agents/kb`, the repository skill, and a non-secret
+scaffold identity manifest may be committed; installed runtimes, enrollment
+state, credentials, implementation source, and machine-specific paths may not.
+Repository root discovery starts from the tracked launcher's own location,
+obtains the Git top level without evaluating shell text, and requires it to be
+the same retained checkout. Every native invocation receives that absolute root
+through `--repo`. An arbitrary current directory, environment-supplied root, or
+global `kb` executable is not authoritative.
+
+Runtime installations are immutable and keyed by exact target plus archive
+SHA-256. The repository launcher resolves its own verified lock directly to the
+matching absolute `bin/kb`, so repositories pinned to different releases can be
+used alternately without a global active symlink. Installation and setup must
+preserve a previously valid runtime after any reported failure.
+
+Automatic scaffold migration initially accepts only the six static generated
+0.1.4 template identities recorded by the Phase 1 fixture: setup, resume, skill,
+generated AGENTS/README, and gitignore. The v1 runtime lock is validated
+separately and migrated to v2; it is not recognized by one static example's
+repository-dependent bytes. `clamp.yaml`, `TODO.md`, and all `knowledge/**` are
+owner data: they are validated where applicable, preserved byte-for-byte, and
+never classified or replaced as scaffold.
+
+The initial `0600`/`0700` modes in the sanitized example describe initializer
+output, not Git identity. Migration recognizes the recorded Git regular versus
+executable modes and requires effective-user-owned regular worktree files with
+no group/other write bits; executable scaffold entries must retain owner
+execute. It does not require a fresh checkout to reproduce private initializer
+modes exactly.
+
+Migration is bootstrapped in the existing assistant's Orb with a separately
+verified standalone 0.2 executable; the old setup-managed runtime is not
+upgraded first. It updates the portable scaffold and v2 runtime lock together
+in a quiescent worktree, preserves `.git`, knowledge, configuration, history,
+and publication state, and never publishes. An owner-modified generated file,
+unknown 0.1.x identity, foreign replacement, active Git operation, or retained
+publication operation fails with reviewable paths and no claimed partial
+success. Reconciliation requires the owner to restore or commit a reviewed
+replacement that exactly matches a separately supported source identity before
+rerunning; there is no overwrite, force, or ignore-modifications bypass. The
+user reviews, commits, and pushes the scaffold update with ordinary Git before
+local cloning. Other 0.1.x identities require an explicit future migration
+contract.
+
+### Local state, Amp authentication, and publication
+
+`amp clone` must produce an exact Amp-hosted HTTPS `origin`. Local setup rejects
+`--no-git-setup`, non-Amp hosts, aliases not explicitly verified by Amp, and
+dangerous local Git proxy, rewrite, include, hook, or credential configuration.
+It requires explicit repository-local `user.name` and `user.email`; it never
+infers or fabricates an author from history, Clamp provenance, or the Amp
+account.
+
+The qualified local Amp executable is enrolled per repository under
+`$XDG_STATE_HOME/clamp/repositories/<sha256-source-identity>/local.json`, with
+`$HOME/.local/state` as the XDG default. The Clamp-created parent chain is
+effective-UID-owned mode `0700` and the file is mode `0600`. The bounded file
+is at most 64 KiB, UTF-8 JSON with depth at most 16 and 256 nodes, rejects
+duplicate and unknown keys, and contains only schema version, canonical source
+identity, target, absolute Amp path, Amp version, executable identity/digest,
+and qualification timestamp. It contains no origin URL, token, credential-
+helper output, knowledge path, thread identity, or service value. Missing,
+malformed, stale, substituted, or over-permissive state fails closed. Same-UID
+processes remain outside the kernel isolation claim.
+
+For the Linux candidate, only the qualified direct-install layout
+`$HOME/.amp/bin/amp` is accepted. Every retained parent and executable is
+revalidated immediately before use; symlink substitution, wrong ownership,
+group/other-writable entries, changed identity, or an unsupported version is
+rejected. Amp automatically updates its CLI, so changed bytes are never trusted
+silently: rerunning `.agents/setup-local` performs the bounded read-only helper
+gate and atomically refreshes enrollment only after the new official executable
+passes. Homebrew and other layouts are unsupported until separately qualified.
+
+Clamp ignores ambient helpers and invokes only the validated absolute Amp
+executable's `git-credential-helper` protocol through explicit Git
+configuration. The subprocess environment is a documented minimal allowlist
+for the qualified local credential store; system/global Git configuration,
+generic helpers, askpass, hooks, includes, proxies, rewrites, and unrelated Amp
+or service variables are removed before credentials are exposed. Credentials
+never enter argv, output, persisted files, or email. Setup proves the helper can
+read the exact origin through a bounded non-mutating remote operation. The
+Linux allowlist is provisional (`HOME`, `XDG_CONFIG_HOME`, `LANG`, and `LC_ALL`)
+until the non-Orb runner proves the official credential store needs no other
+input; macOS receives its own native-qualified allowlist rather than inheriting
+Linux assumptions.
+
+Local `kb publish` preserves the v1 managed-file, clean-history, non-force,
+rebase, retry, exact-pushed-commit synchronization, preservation, and stale-
+index rules. It additionally requires authenticated current-thread identity
+from Amp itself; environment variables, branch names, files, or command output
+cannot supply it. Full local support also requires Amp's authenticated current-
+thread-owner email capability so each durably preserved genuine conflict causes
+one best-effort notification request. Whether a local executor exposes both
+capabilities remains a native Phase 1 gate. No external email provider is added,
+and lack of notification capability must not weaken conflict preservation or be
+described as full support.
+
+### Legacy release compatibility boundary
+
+The immutable 0.1.4 release client honors an HTTPS forward proxy but does not
+honor a private test CA supplied only through the tested process-local
+`CURL_CA_BUNDLE` and `SSL_CERT_FILE` environment. It therefore cannot safely
+fetch unpublished draft assets through the proposed intercepting proxy, and
+that mechanism is not release evidence.
+
+Before publication, an operator independently verifies and safely extracts the
+final legacy Linux archive, then invokes the immutable reviewed 0.1.4
+executable's explicit offline initializer with the final version, revision,
+fixed public URL, archive SHA-256, and extracted runtime root. The initializer
+must succeed from those exact bytes and produce the expected source-free
+scaffold. Independent archive validation covers the same bounded layout,
+markers, executable, and static template identities required by the 0.1.4
+client. After the single public promotion, the immutable client must also pass
+a discovery/download smoke test against the real fixed public URL before broad
+adoption. This split is the only accepted prepublication compatibility path;
+it does not permit publishing a partial release or treating the post-publication
+smoke test as reversible.
+
+### Credential and degraded-operation boundaries
+
+Amp project secrets are not copied to a local CLI process. Users supply service
+values from their own secure environment or secret manager when launching Amp;
+setup never writes a `.env` or recommends secrets in argv, shell history, or an
+agent-readable file.
+
+- Validation, mutation, task/TODO operations, and local Markdown/`rg` fallback
+  need no service credential.
+- Indexed `get` requires only `KB_DATABASE_URL`; it does not embed or require
+  authenticated Git.
+- Semantic search requires `KB_DATABASE_URL` and `OPENROUTER_API_KEY`.
+- Synchronization requires authenticated Amp Git and
+  `KB_DATABASE_DIRECT_URL`, plus `OPENROUTER_API_KEY` only when embeddings are
+  necessary.
+- Publication requires authenticated Amp Git and repository-local author/thread
+  identity. A successful push remains durable if post-push synchronization
+  lacks a service credential and reports the existing stale-index result.
+
+Missing credentials preserve their existing v1 codes and exit classes:
+`database_url_missing` and `database_direct_url_missing` are user errors (2),
+while `openrouter_api_key_missing` is authentication (4). Their existing
+explicitly non-semantic fallback details remain unchanged.
+
+### New stable machine contract
+
+New setup and migration paths use the existing success envelope
+`{ok:true,code,data}`, failure envelope `{ok:false,code,message,details}`, and
+exit classes 0/2/3/4/5/6/70. Human wrappers may add prose outside `--json`, but
+the skill branches only on these codes and documented body-free detail keys.
+This section remains authoritative; its exact machine-readable representation
+is the sanitized `test/fixtures/v0_2_phase1/contracts.json` fixture. That
+fixture freezes each code's command scopes, selection identifier, exit class,
+and exact typed, bounded required payload shape. Unknown or duplicate contract,
+shape, or field keys are invalid. The code families are:
+
+- target/preflight: `local_target_unsupported`, `local_target_unqualified`,
+  `local_filesystem_unsupported`, `local_prerequisite_missing`,
+  `local_setup_repository_invalid`, `local_setup_dirty_worktree`,
+  `local_setup_origin_invalid`, `local_git_author_missing`, and
+  `local_capability_unavailable`;
+- setup success/failure: `local_setup_installed`, `local_setup_unchanged`,
+  `local_runtime_installation_unsafe`, and `local_runtime_install_failed`;
+- scaffold: `scaffold_upgrade_complete`, `scaffold_already_current`,
+  `scaffold_source_unsupported`, `scaffold_owner_modified`, `scaffold_busy`,
+  `scaffold_recovery_required`, and `scaffold_upgrade_failed`;
+- runtime metadata: `runtime_lock_v2_invalid`, `runtime_manifest_invalid`,
+  `runtime_manifest_too_large`, `runtime_manifest_checksum_mismatch`,
+  `runtime_manifest_target_missing`, `runtime_archive_too_large`,
+  `runtime_archive_checksum_mismatch`, `runtime_archive_invalid`, and
+  `runtime_download_failed`; and
+- local Amp: `local_amp_missing`, `local_amp_version_unsupported`,
+  `local_amp_installation_unsafe`, `local_amp_changed`,
+  `local_amp_login_required`, `local_amp_helper_protocol_invalid`,
+  `local_amp_helper_timeout`, `local_amp_remote_unavailable`, and
+  `local_notification_capability_missing`.
+
+Messages and details never contain knowledge bodies, service values, helper
+responses, credential-bearing URLs, or arbitrary subprocess output. Adding or
+renaming a code, changing its exit class, or broadening its details is a product
+contract change requiring fixture, PRD, acceptance, and skill review together.
+When any local Amp authentication code is returned by `kb sync`, its ordinary
+typed details are extended with required
+`{fallback:"local_markdown_or_rg",semantic_equivalent:false}` and optional
+bounded v1 diagnostics. Setup-local and publication do not add that fallback
+extension. `database_direct_url_missing` and `openrouter_api_key_missing` are
+top-level synchronization results, not post-push publication results. After a
+successful push, publication preserves the existing
+`publish_complete_index_stale` or
+`publish_complete_index_stale_cleanup_pending` top-level result, stale-index
+exit class, `published:true`, commit identity, and the credential code as its
+body-free `cause`. Missing executable and missing enrollment deliberately share
+`local_amp_missing`; a present but changed enrolled executable returns
+`local_amp_changed`. A syntactically accepted legacy lock encountered by
+scaffold migration is migrated, while a malformed v2 lock returns
+`runtime_lock_v2_invalid`.
+
+### 0.2.0 local-clone acceptance criteria
+
+L1. Every advertised target has native evidence for the exact prerequisite,
+filesystem, Amp helper, package, disposable database, and end-to-end gates.
+L2. Real `amp clone` followed by setup twice leaves the checkout byte-for-byte
+clean and preserves the previously valid runtime under every injected failure.
+L3. The repository launcher selects its own exact runtime without prior `PATH`
+activation, including alternating repositories pinned to different digests.
+L4. Exact 0.1.4 scaffold migration preserves owner/Git/knowledge state, while
+owner-modified, unknown, busy, interrupted, and foreign states fail closed and
+remain recoverable without partial reported success.
+L5. Local authentication exposes credentials only to the exact Amp origin
+through a revalidated official helper; helper update, substitution, hostile Git
+configuration, malformed output, timeout, and missing login tests are body-free.
+L6. Local and Orb agents preserve identical assertion, confirmation,
+verification, task, TODO, publication, conflict, and stale-index behavior.
+L7. A local genuine conflict is durably preserved before exactly one
+authenticated owner-notification request; cleanup retry neither repushes nor
+duplicates the request.
+L8. Credential-removal tests prove each operation requires only its documented
+inputs. In particular, fresh compatible indexed `get` succeeds and records one
+access without OpenRouter or the direct database URL.
+L9. Concurrent Orb/local synchronization cannot regress a newer checkpoint,
+re-embed unchanged content, lose surviving-path telemetry, or treat an
+uncertain get COMMIT as exactly once.
+L10. Generated consumer instructions refer only to files and commands present
+in the source-free assistant and never claim source-development or production
+rollout evidence.
+L11. Every new result code has an exact exit class and body-free detail
+allowlist; all v1 envelopes, codes, and exits remain unchanged.
+L12. Final artifacts pass exact 0.1.4 compatibility, target-native acceptance,
+single-promotion release, and post-publication discovery gates before broad
+adoption.
 
 ## Repository layout
 

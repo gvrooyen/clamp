@@ -3,7 +3,11 @@
 ## Status and authority
 
 Clamp v1 and the original implementation phases 0–9 are complete. Version
-0.1.4 is the latest published production release.
+0.1.4 is the latest published production release. Release 0.2.0 Phase 1 is in
+progress: its non-native contract fixtures are repository-owned, but Linux
+local-runner qualification and part of Apple-silicon macOS qualification remain
+pending. Native Mac APFS and disposable database feasibility have passed; no
+local target is accepted or advertised yet.
 
 [PRD.md](./PRD.md) is authoritative for product behavior. This document maps
 that contract to repository-owned evidence and defines the boundary between
@@ -160,3 +164,44 @@ Keep this matrix synchronized with the PRD's numbered v1 criteria, registered
 test names, command help, user documentation, and the repository skill. New
 product behavior belongs in the PRD first; new or renamed evidence must update
 this matrix in the same change.
+
+## 0.2.0 Phase 1 contract acceptance
+
+The Phase 1 contract test is `v0_2_phase1_test` / `contract freeze`. It validates
+the machine-readable fixture schema, unique stable result codes and unchanged
+exit classes, typed body-free payload allowlists, exact replaceable v0.1.4
+scaffold identities, the owner-modified counterfixture, source-free 0.2 scaffold
+inventory, target and prerequisite states, hostile local-state cases, and
+synchronization between the fixtures and the planned PRD contract.
+
+The sanitized observation procedure and pending native protocol are in
+[Local-clone Phase 1 qualification](./docs/local-clone-phase1.md). Repository
+tests must not convert an Orb observation or mock into native target evidence.
+
+| PRD 0.2 criterion | Repository-owned Phase 1 evidence | Remaining native/implementation gate |
+| --- | --- | --- |
+| L1. Advertised targets are natively qualified | `v0_2_phase1_test` / `contract freeze` / `target and environment fixtures`; native Mac APFS, isolated authenticated read-only Amp Git, and private PostgreSQL 15.19/pgvector 0.8.1 feasibility evidence | **Phase 1 pending:** non-Orb Linux qualification; Mac ordinary-update, local-executor identity/notification decision, minimum OS, and source-free consumer bootstrap closure. **Later phases:** Darwin runtime/package implementation, signing, application-level durability, and end-to-end gates. |
+| L2. Setup is clean, idempotent, and failure-preserving | Fixture contract only | Phase 4 implementation plus native end-to-end. |
+| L3. Repository launcher selects independent pins | Fresh-0.2 scaffold inventory fixture | Phase 4 implementation and alternating-repository native test. |
+| L4. Exact 0.1.4 migration is fail-closed | Exact and owner-modified scaffold fixtures | Phase 4 migration, interruption, and recovery tests. |
+| L5. Local Amp authentication is narrow | Sanitized Orb/clone observation fixture; hostile-state cases | Phase 5 helper implementation and real local-login/update gate on each target. |
+| L6. Local and Orb semantics agree | Existing v1 acceptance remains the required baseline | Phase 6 cross-executor workflow. |
+| L7. Conflict notification remains preservation-gated | Existing v1 preservation/email evidence | Native current-thread identity and owner-email capability plus Phase 6 workflow. |
+| L8. Credentials are operation-scoped | Stable existing missing-credential codes in the contract fixture | Phase 6 credential-removal workflow, including indexed `get`. |
+| L9. Concurrent sync and telemetry remain honest | Existing v1 sync/retrieval evidence | Phase 6 delayed cross-executor sync and uncertain-COMMIT workflow. |
+| L10. Generated instructions are consumer-only | Fresh-0.2 source-free inventory fixture | Phase 4 generated-template audit and golden tests. |
+| L11. Machine contracts remain stable and body-free | `v0_2_phase1_test` / `contract freeze` / `stable envelopes and codes` | Each implementation phase must produce the frozen codes. |
+| L12. Release is compatible and promoted once | Exact public v0.1.4 identities in the scaffold fixture | Final-artifact compatibility, native target, draft, and publication gates. |
+
+The immutable reviewed 0.1.4 executable's isolated HTTPS proxy/private-CA
+experiment and the qualified replacement are recorded in the environment
+fixture and qualification record. The executable used the proxy but did not
+honor the process-local private CA, so that fixture is rejected. Its explicit
+offline initializer was instead proved with independently verified exact
+archive bytes. Repeating that protocol against final 0.2.0 legacy bytes remains
+a release gate, not an unresolved Phase 1 feasibility decision.
+
+Phase 1 may be marked complete in [PLAN.md](./PLAN.md) only after all Phase 1
+native rows are resolved and Oracle's final implementation review gives a green
+light. Later-phase rows are intentionally not Phase 1 completion blockers; they
+remain release blockers.

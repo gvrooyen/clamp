@@ -320,7 +320,11 @@ let documentation_and_cli_contract_drift () =
   check_contains "README records current release" readme "v0.1.3";
   check_contains "operations guide marks production operator-controlled"
     (read (path "docs/operations.md")) "no production authority";
-  check_absent "ACCEPTANCE has no pending matrix disposition" acceptance
+  let v1_matrix =
+    section ~heading:"## Acceptance-criteria traceability"
+      ~next_heading:"## Maintaining acceptance evidence" acceptance
+  in
+  check_absent "v1 ACCEPTANCE has no pending matrix disposition" v1_matrix
     "**Pending:**"
 
 let write_executable file body =

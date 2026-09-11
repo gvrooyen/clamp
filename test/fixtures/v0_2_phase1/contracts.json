@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "envelopes": {
+    "success": ["ok", "code", "data"],
+    "failure": ["ok", "code", "message", "details"]
+  },
+  "exit_classes": [
+    {"name": "success", "code": 0},
+    {"name": "user_error", "code": 2},
+    {"name": "conflict", "code": 3},
+    {"name": "authentication", "code": 4},
+    {"name": "transient_external", "code": 5},
+    {"name": "stale_index", "code": 6},
+    {"name": "internal", "code": 70}
+  ],
+  "payload_shapes": {
+    "none": [],
+    "target": [{"name": "target", "type": "identifier", "max_bytes": 64}],
+    "target_gate": [{"name": "target", "type": "identifier", "max_bytes": 64}, {"name": "gate", "type": "enum", "values": ["helper", "filesystem", "package", "database", "thread_identity", "owner_email"]}],
+    "target_filesystem": [{"name": "target", "type": "identifier", "max_bytes": 64}, {"name": "filesystem", "type": "identifier", "max_bytes": 64}],
+    "prerequisite": [{"name": "prerequisite", "type": "enum", "values": ["amp", "bash", "git", "curl", "python3", "tar", "sha256sum", "rg"]}, {"name": "minimum_version", "type": "version", "max_bytes": 64}],
+    "cause": [{"name": "cause", "type": "enum", "values": ["not_git_repository", "root_mismatch", "gitdir_unsafe", "origin_missing", "origin_not_amp_https", "origin_identity_mismatch", "entry_kind", "owner", "permissions", "symlink", "identity", "schema", "unknown_key", "size", "value", "download", "extract", "verify", "install", "rollback"]}],
+    "paths": [{"name": "paths", "type": "path_list", "max_items": 100, "item_max_bytes": 4096}],
+    "author_fields": [{"name": "fields", "type": "enum_list", "values": ["user.name", "user.email"], "max_items": 2}],
+    "capability": [{"name": "capability", "type": "enum", "values": ["helper", "filesystem", "package", "database", "thread_identity", "owner_email"]}],
+    "target_capability": [{"name": "target", "type": "identifier", "max_bytes": 64}, {"name": "capability", "type": "enum", "values": ["helper", "filesystem", "package", "database", "thread_identity", "owner_email"]}],
+    "runtime_success": [{"name": "target", "type": "identifier", "max_bytes": 64}, {"name": "runtime_revision", "type": "sha1"}, {"name": "runtime_sha256", "type": "sha256"}],
+    "unsafe_path": [{"name": "cause", "type": "enum", "values": ["entry_kind", "owner", "permissions", "symlink", "identity", "schema", "unknown_key", "size", "value"]}, {"name": "path_kind", "type": "enum", "values": ["state_root", "state_file", "install_root", "runtime", "amp_parent", "amp_executable"]}],
+    "scaffold_complete": [{"name": "from_version", "type": "version", "max_bytes": 64}, {"name": "to_version", "type": "version", "max_bytes": 64}, {"name": "changed_paths", "type": "path_list", "max_items": 100, "item_max_bytes": 4096}],
+    "version": [{"name": "version", "type": "version", "max_bytes": 64}],
+    "source_version": [{"name": "source_version", "type": "version", "max_bytes": 64}],
+    "scaffold_state": [{"name": "state", "type": "enum", "values": ["dirty_worktree", "merge", "rebase", "publication_state", "transaction_recovery"]}],
+    "scaffold_state_paths": [{"name": "state", "type": "enum", "values": ["transaction_recovery", "foreign_replacement"]}, {"name": "paths", "type": "path_list", "max_items": 100, "item_max_bytes": 4096}],
+    "limit": [{"name": "limit_bytes", "type": "integer", "minimum": 1, "maximum": 536870912}],
+    "amp_versions": [{"name": "minimum_version", "type": "version", "max_bytes": 64}, {"name": "observed_version", "type": "version", "max_bytes": 64}],
+    "digests": [{"name": "expected_digest", "type": "sha256"}, {"name": "observed_digest", "type": "sha256"}],
+    "timeout": [{"name": "timeout_seconds", "type": "integer", "minimum": 1, "maximum": 120}],
+    "fallback": [{"name": "fallback", "type": "enum", "values": ["local_markdown_or_rg"]}, {"name": "semantic_equivalent", "type": "boolean", "value": false}]
+  },
+  "context_extensions": {
+    "sync_fallback": {
+      "codes": ["local_amp_missing", "local_amp_version_unsupported", "local_amp_installation_unsafe", "local_amp_changed", "local_amp_login_required", "local_amp_helper_protocol_invalid", "local_amp_helper_timeout", "local_amp_remote_unavailable"],
+      "required_shape": "fallback",
+      "optional_field": {"name": "diagnostics", "type": "diagnostic_list", "max_items": 1000}
+    },
+    "publication_sync_cause": {
+      "codes": ["database_direct_url_missing", "openrouter_api_key_missing"],
+      "top_level_codes": ["publish_complete_index_stale", "publish_complete_index_stale_cleanup_pending"],
+      "published": true,
+      "top_level_exit_class": "stale_index"
+    }
+  },
+  "contracts": [
+    {"category": "target", "code": "local_target_unsupported", "ok": false, "exit_class": "user_error", "scopes": ["setup_local", "launcher"], "selection": "detected_target_not_listed", "payload_shape": "target"},
+    {"category": "target", "code": "local_target_unqualified", "ok": false, "exit_class": "user_error", "scopes": ["setup_local", "launcher"], "selection": "listed_target_gate_incomplete", "payload_shape": "target_gate"},
+    {"category": "target", "code": "local_filesystem_unsupported", "ok": false, "exit_class": "user_error", "scopes": ["setup_local"], "selection": "filesystem_not_accepted", "payload_shape": "target_filesystem"},
+    {"category": "target", "code": "local_prerequisite_missing", "ok": false, "exit_class": "user_error", "scopes": ["setup_local"], "selection": "required_tool_absent_or_too_old", "payload_shape": "prerequisite"},
+
+    {"category": "preflight", "code": "local_setup_repository_invalid", "ok": false, "exit_class": "user_error", "scopes": ["setup_local"], "selection": "launcher_root_not_retained_checkout", "payload_shape": "cause"},
+    {"category": "preflight", "code": "local_setup_dirty_worktree", "ok": false, "exit_class": "user_error", "scopes": ["setup_local"], "selection": "tracked_or_unignored_state_present", "payload_shape": "paths"},
+    {"category": "preflight", "code": "local_setup_origin_invalid", "ok": false, "exit_class": "user_error", "scopes": ["setup_local"], "selection": "origin_not_exact_amp_identity", "payload_shape": "cause"},
+    {"category": "preflight", "code": "local_git_author_missing", "ok": false, "exit_class": "user_error", "scopes": ["setup_local", "publish"], "selection": "repository_local_author_incomplete", "payload_shape": "author_fields"},
+    {"category": "preflight", "code": "local_capability_unavailable", "ok": false, "exit_class": "user_error", "scopes": ["setup_local"], "selection": "qualified_target_capability_missing", "payload_shape": "target_capability"},
+
+    {"category": "setup", "code": "local_setup_installed", "ok": true, "exit_class": "success", "scopes": ["setup_local"], "selection": "verified_runtime_newly_installed", "payload_shape": "runtime_success"},
+    {"category": "setup", "code": "local_setup_unchanged", "ok": true, "exit_class": "success", "scopes": ["setup_local"], "selection": "verified_runtime_already_installed", "payload_shape": "runtime_success"},
+    {"category": "setup", "code": "local_runtime_installation_unsafe", "ok": false, "exit_class": "user_error", "scopes": ["setup_local", "launcher"], "selection": "install_or_state_path_failed_trust_check", "payload_shape": "unsafe_path"},
+    {"category": "setup", "code": "local_runtime_install_failed", "ok": false, "exit_class": "internal", "scopes": ["setup_local"], "selection": "verified_candidate_install_or_rollback_failed", "payload_shape": "cause"},
+
+    {"category": "scaffold", "code": "scaffold_upgrade_complete", "ok": true, "exit_class": "success", "scopes": ["scaffold_upgrade"], "selection": "candidate_installed_and_validated", "payload_shape": "scaffold_complete"},
+    {"category": "scaffold", "code": "scaffold_already_current", "ok": true, "exit_class": "success", "scopes": ["scaffold_upgrade"], "selection": "exact_target_scaffold_present", "payload_shape": "version"},
+    {"category": "scaffold", "code": "scaffold_source_unsupported", "ok": false, "exit_class": "user_error", "scopes": ["scaffold_upgrade"], "selection": "source_identity_not_registered", "payload_shape": "source_version"},
+    {"category": "scaffold", "code": "scaffold_owner_modified", "ok": false, "exit_class": "conflict", "scopes": ["scaffold_upgrade"], "selection": "replaceable_scaffold_bytes_differ", "payload_shape": "paths"},
+    {"category": "scaffold", "code": "scaffold_busy", "ok": false, "exit_class": "conflict", "scopes": ["scaffold_upgrade"], "selection": "repository_not_quiescent", "payload_shape": "scaffold_state"},
+    {"category": "scaffold", "code": "scaffold_recovery_required", "ok": false, "exit_class": "conflict", "scopes": ["scaffold_upgrade"], "selection": "owned_interrupted_operation_detected", "payload_shape": "scaffold_state_paths"},
+    {"category": "scaffold", "code": "scaffold_upgrade_failed", "ok": false, "exit_class": "internal", "scopes": ["scaffold_upgrade"], "selection": "reported_rollback_cannot_be_proved", "payload_shape": "cause"},
+
+    {"category": "runtime_metadata", "code": "runtime_lock_v2_invalid", "ok": false, "exit_class": "user_error", "scopes": ["setup_local", "launcher", "scaffold_upgrade"], "selection": "v2_lock_schema_or_value_invalid", "payload_shape": "cause"},
+    {"category": "runtime_metadata", "code": "runtime_manifest_invalid", "ok": false, "exit_class": "user_error", "scopes": ["init", "setup_local", "scaffold_upgrade", "upgrade"], "selection": "manifest_schema_or_value_invalid", "payload_shape": "cause"},
+    {"category": "runtime_metadata", "code": "runtime_manifest_too_large", "ok": false, "exit_class": "user_error", "scopes": ["init", "setup_local", "scaffold_upgrade", "upgrade"], "selection": "manifest_exceeds_fixed_byte_limit", "payload_shape": "limit"},
+    {"category": "runtime_metadata", "code": "runtime_manifest_checksum_mismatch", "ok": false, "exit_class": "user_error", "scopes": ["init", "setup_local", "scaffold_upgrade", "upgrade"], "selection": "manifest_digest_differs_from_lock_or_checksum", "payload_shape": "none"},
+    {"category": "runtime_metadata", "code": "runtime_manifest_target_missing", "ok": false, "exit_class": "user_error", "scopes": ["init", "setup_local", "scaffold_upgrade", "upgrade"], "selection": "detected_target_absent_from_valid_manifest", "payload_shape": "target"},
+    {"category": "runtime_metadata", "code": "runtime_archive_too_large", "ok": false, "exit_class": "user_error", "scopes": ["init", "setup_local", "scaffold_upgrade", "upgrade"], "selection": "archive_or_extracted_payload_exceeds_limit", "payload_shape": "limit"},
+    {"category": "runtime_metadata", "code": "runtime_archive_checksum_mismatch", "ok": false, "exit_class": "user_error", "scopes": ["init", "setup_local", "scaffold_upgrade", "upgrade"], "selection": "archive_digest_differs_from_authenticated_target", "payload_shape": "none"},
+    {"category": "runtime_metadata", "code": "runtime_archive_invalid", "ok": false, "exit_class": "user_error", "scopes": ["init", "setup_local", "scaffold_upgrade", "upgrade"], "selection": "archive_layout_marker_or_executable_invalid", "payload_shape": "cause"},
+    {"category": "runtime_metadata", "code": "runtime_download_failed", "ok": false, "exit_class": "transient_external", "scopes": ["init", "setup_local", "scaffold_upgrade", "upgrade"], "selection": "bounded_https_request_failed", "payload_shape": "cause"},
+
+    {"category": "amp_helper", "code": "local_amp_missing", "ok": false, "exit_class": "authentication", "scopes": ["setup_local", "sync", "publish"], "selection": "enrollment_or_qualified_executable_absent", "payload_shape": "none"},
+    {"category": "amp_helper", "code": "local_amp_version_unsupported", "ok": false, "exit_class": "authentication", "scopes": ["setup_local", "sync", "publish"], "selection": "amp_version_below_qualified_minimum", "payload_shape": "amp_versions"},
+    {"category": "amp_helper", "code": "local_amp_installation_unsafe", "ok": false, "exit_class": "authentication", "scopes": ["setup_local", "sync", "publish"], "selection": "amp_or_enrollment_failed_trust_check", "payload_shape": "unsafe_path"},
+    {"category": "amp_helper", "code": "local_amp_changed", "ok": false, "exit_class": "authentication", "scopes": ["sync", "publish"], "selection": "enrolled_executable_digest_changed", "payload_shape": "digests"},
+    {"category": "amp_helper", "code": "local_amp_login_required", "ok": false, "exit_class": "authentication", "scopes": ["setup_local", "sync", "publish"], "selection": "helper_returned_no_credential", "payload_shape": "none"},
+    {"category": "amp_helper", "code": "local_amp_helper_protocol_invalid", "ok": false, "exit_class": "authentication", "scopes": ["setup_local", "sync", "publish"], "selection": "helper_response_invalid_or_oversized", "payload_shape": "cause"},
+    {"category": "amp_helper", "code": "local_amp_helper_timeout", "ok": false, "exit_class": "transient_external", "scopes": ["setup_local", "sync", "publish"], "selection": "helper_deadline_expired", "payload_shape": "timeout"},
+    {"category": "amp_helper", "code": "local_amp_remote_unavailable", "ok": false, "exit_class": "transient_external", "scopes": ["setup_local", "sync", "publish"], "selection": "authenticated_read_only_remote_check_failed", "payload_shape": "cause"},
+    {"category": "amp_helper", "code": "local_notification_capability_missing", "ok": false, "exit_class": "user_error", "scopes": ["setup_local", "publish"], "selection": "authenticated_owner_email_tool_absent", "payload_shape": "capability"},
+
+    {"category": "service_credentials", "code": "database_url_missing", "ok": false, "exit_class": "user_error", "scopes": ["search", "get"], "selection": "pooled_database_url_absent", "payload_shape": "fallback"},
+    {"category": "service_credentials", "code": "database_direct_url_missing", "ok": false, "exit_class": "user_error", "scopes": ["sync"], "selection": "direct_database_url_absent", "payload_shape": "fallback"},
+    {"category": "service_credentials", "code": "openrouter_api_key_missing", "ok": false, "exit_class": "authentication", "scopes": ["search", "sync"], "selection": "embedding_required_and_openrouter_key_absent", "payload_shape": "fallback"}
+  ]
+}

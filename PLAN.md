@@ -162,6 +162,17 @@ requiring PRD review and migration/reindex planning.
 
 ## Phase 1: Freeze the 0.2 contract and fixtures
 
+**Status: in progress.** The repository-owned contract, sanitized fixtures,
+tests, and immutable-0.1.4 prepublication compatibility mechanism are
+implemented and Oracle-reviewed with no repository-owned blockers. Native
+non-Orb Linux gates and the remaining Apple-silicon macOS consumer-bootstrap,
+ordinary-update, and local-executor identity/notification decisions remain
+pending. Native Mac APFS, isolated authenticated read-only Amp Git, and
+disposable database feasibility have passed. Native runtime/package,
+application durability, signing, and end-to-end work remain later-phase gates,
+not Phase 1 prerequisites. Phase 1 is not complete and no local target is
+supported yet.
+
 ### Deliverables
 
 - Add a PRD 0.2 section defining local-clone behavior, supported targets,
@@ -563,16 +574,17 @@ On every target accepted at the Phase 1 exit gate:
    unpublished. Verify the draft inventory and identities through an
    authenticated operator path. Interrupted uploads stay unpublished and
    retryable; preserve legacy Linux assets needed by old standalone clients.
-4. Test exact 0.1.4 scaffold migration and rollback against the final bytes
-   through an egress-blocked HTTPS forward proxy with a private test CA supplied
-   only to the test process. The proxy serves the draft's exact immutable asset
-   set for the original GitHub host and fixed URL paths expected by the reviewed
-   0.1.4 executable; Phase 1 first proves the immutable executable honors this
-   standard proxy/CA environment. The fixture must not alter DNS, the public
-   release, or the executable under test. If the immutable client cannot use
-   this fixture, the Phase 1 exit gate remains blocked until another explicit
-   prepublication mechanism is specified and proved. After publication, run a
-   discovery-only smoke test against the real public URLs.
+4. Test exact 0.1.4 scaffold migration and rollback against the final bytes.
+   Independently verify and safely extract the final legacy Linux archive, then
+   invoke the immutable reviewed 0.1.4 executable's explicit offline initializer
+   with the final version, revision, fixed public URL, archive SHA-256, and
+   extracted runtime root. Require the exact expected source-free scaffold. The
+   Phase 1 proxy/private-CA experiment proved that the immutable client uses the
+   proxy but does not accept the process-local test CA, while the replacement
+   offline mechanism succeeded against exact public 0.1.4 bytes. Do not use the
+   failed proxy fixture as evidence. After the one public promotion, run the
+   immutable client's discovery/download smoke test against the real fixed
+   public URL before broad adoption.
 5. Obtain explicit approval for, execute, and pass the disposable real-
    Amp/Neon/OpenRouter end-to-end gate using the final draft artifacts. Record
    only body-free evidence outside the public baseline.

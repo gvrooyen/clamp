@@ -119,6 +119,37 @@ previous executable when verification or installation fails. Release/latest
 initialization uses the selected package's templates; explicit version,
 revision, URL, and digest pins support offline and controlled initialization.
 
+### Planned 0.2 local execution boundary
+
+The planned 0.2 architecture preserves one native `kb` implementation and one
+tracked skill across Orbs and qualified local machines. A generated
+repository-owned `.agents/kb` launcher discovers its own retained Git root,
+verifies that repository's v2 runtime lock, selects an immutable installation
+by exact target and archive digest, and invokes the absolute executable with an
+explicit `--repo`. There is no process-global active runtime requirement, so
+two repositories may retain different pins.
+
+`.agents/setup` remains Orb lifecycle code. `.agents/setup-local` performs only
+explicit local preflight, verified runtime installation, enrollment, and
+validation; it neither adapts tracked files nor runs Orb PostgreSQL setup.
+Machine-local Amp enrollment lives outside the checkout in an effective-user-
+private XDG state tree and contains no secret. Local Git operations retain the
+existing `Sync`/`Publication` ownership boundary: only a revalidated official
+Amp helper receives a minimal credential environment for an exact Amp-hosted
+origin, while all Git safety, preservation, retry, and exact-SHA indexing rules
+remain shared.
+
+Scaffold migration is a distinct `Initializer`/upgrade responsibility. It
+recognizes exact generated identities, updates the scaffold and lock as one
+recoverable repository operation, and never publishes or replaces `.git`.
+Runtime-manifest parsing, target detection, local enrollment, and platform
+filesystem primitives must remain independently testable boundaries rather
+than shell overrides around Linux behavior.
+
+This boundary is contractual but not implemented in v0.1.4. The accepted
+target matrix and pending native evidence are recorded in
+[the Phase 1 qualification record](./docs/local-clone-phase1.md).
+
 ## Embeddings and synchronization
 
 Embedding input is deterministic: type, title, description, sorted tags, and
