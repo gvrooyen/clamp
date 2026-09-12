@@ -5,7 +5,7 @@
 Clamp v1 and the original implementation phases 0–9 are complete. Version
 0.1.4 is the latest published production release. Release 0.2.0 Phase 1 is in
 progress: its non-native contract fixtures are repository-owned, but Linux
-and Apple-silicon macOS ordinary-update requalification remains pending. Native
+ordinary-update requalification remains pending. Native
 filesystem, source-free bootstrap, isolated Amp Git, local-runner interfaces,
 and disposable database feasibility passed on both candidates; no local target
 is accepted or advertised yet.
@@ -181,7 +181,7 @@ tests must not convert an Orb observation or mock into native target evidence.
 
 | PRD 0.2 criterion | Repository-owned Phase 1 evidence | Remaining native/implementation gate |
 | --- | --- | --- |
-| L1. Advertised targets are natively qualified | `v0_2_phase1_test` / `contract freeze` / `target and environment fixtures`; native ext4/APFS, frozen bootstrap contracts, isolated authenticated read-only Amp Git, local-runner thread/email interfaces, and private PostgreSQL 15.19/pgvector 0.8.1 feasibility evidence on both candidates | **Phase 1 pending:** ordinary-update requalification on Linux and Mac. **Later phases:** runtime/package implementation, signing where applicable, application-level durability, and end-to-end gates. |
+| L1. Advertised targets are natively qualified | `v0_2_phase1_test` / `contract freeze` / `target and environment fixtures`; native ext4/APFS, frozen bootstrap contracts, isolated authenticated read-only Amp Git, local-runner thread/email interfaces, and private PostgreSQL 15.19/pgvector 0.8.1 feasibility evidence on both candidates; Mac ordinary-update requalification | **Phase 1 pending:** ordinary-update requalification on Linux. **Later phases:** runtime/package implementation, signing where applicable, application-level durability, and end-to-end gates. |
 | L2. Setup is clean, idempotent, and failure-preserving | Fixture contract only | Phase 4 implementation plus native end-to-end. |
 | L3. Repository launcher selects independent pins | Fresh-0.2 scaffold inventory fixture | Phase 4 implementation and alternating-repository native test. |
 | L4. Exact 0.1.4 migration is fail-closed | Exact and owner-modified scaffold fixtures | Phase 4 migration, interruption, and recovery tests. |

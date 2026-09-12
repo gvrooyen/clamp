@@ -7,7 +7,7 @@ This record supports the planned Clamp 0.2.0 contract in
 than treating one Orb as proof of a local target. No local target is supported
 until its native acceptance gates pass.
 
-Status on 2026-09-11:
+Status on 2026-09-12:
 
 - Linux x86-64 on local ext4 is a candidate after native non-Orb testing.
   Filesystem primitives, source-free bootstrap, authenticated read-only Amp
@@ -18,9 +18,10 @@ Status on 2026-09-11:
   (build 25F84). Local writable case-insensitive APFS primitives and a private
   PostgreSQL/pgvector harness passed. The minimum is conservatively fixed to
   macOS 26.5.2, and the source-free consumer bootstrap and authenticated local-
-  runner thread/owner-email interfaces are qualified. Runtime porting,
-  packaging, and update requalification remain pending. A real existing-project
-  clone and isolated authenticated read-only Git operation passed.
+  runner thread/owner-email interfaces are qualified. A user-attested ordinary
+  Amp update produced an updater-correlated replacement that passed official-
+  checksum and full helper/path regression checks. Runtime porting and packaging
+  remain later-phase work.
 - Phase 1 is therefore in progress and must not be marked complete.
 
 ## Authoritative Amp documentation
@@ -83,8 +84,9 @@ Native Apple-silicon observations from runner `clamp-macos`:
 | --- | --- | --- |
 | Host | macOS 26.5.2 build 25F84, native arm64, local writable case-insensitive APFS | Fix 26.5.2 as the conservative minimum; do not claim support for an older macOS release from this evidence. |
 | APFS primitives | Directory `fsync`, file `F_FULLFSYNC`, descriptor `flock`, hard-link identity, no-follow traversal, retained descriptors, descriptor-relative unlink, exclusive/exchange rename, and exchange rollback passed in a disposable directory | Native filesystem implementation is feasible; application-level failure injection and abrupt-interruption tests remain with implementation. |
-| Amp installation | `$HOME/.local/bin/amp` symlink to regular arm64 Mach-O `$HOME/.amp/bin/amp`; observed version `0.0.1789113641-gcd8b8a`; bytes matched the official checksum; retained chain was not group/other writable | Candidate direct-install shape. Ordinary-update requalification must establish the prior and replacement official identities/checksums and repeat the retained-path/helper/read-only checks. |
-| Ordinary-update evidence | The current executable was unchanged throughout qualification. Bounded non-secret installation metadata and logs contained no authoritative prior executable identity; timestamps cannot distinguish update from fresh install or replacement. | Remains pending. Do not force an update or infer an update from current-file timestamps. |
+| Amp installation | `$HOME/.local/bin/amp` symlink to regular arm64 Mach-O `$HOME/.amp/bin/amp`; current observed version `0.0.1789171288-gd95a61`; bytes matched the official checksum; retained chain was not group/other writable | Qualified direct-install shape. Keep `0.0.1789113641-gcd8b8a` as the common minimum; revalidate the installed executable identity before every credential-helper use. |
+| Ordinary-update evidence | The owner reported that the runner had updated in response to instructions to wait for an ordinary natural update without forcing or reinstalling. Amp changed from `0.0.1789113641-gcd8b8a` / SHA-256 `3c9371af1bed55f8fec8f03fe72f0e06f9aec97f671ee2338e131d1fb938d37d` to `0.0.1789171288-gd95a61` / SHA-256 `9b3c6eb26ccaa94d3c0d016d0a82e48c6d79d117d0559854e4ae752d09b321eb`; both digests matched official checksums, and a sanitized updater-success event aligned with the replacement. | Passed by accepting this contextual owner attestation together with updater-correlated local evidence and successful post-update checks. The log alone does not distinguish automatic from manual invocation. |
+| Post-update regression | Direct path retained; binary inode changed; ownership/modes and no-follow parent validation passed; stable symlink was unchanged; disposable clone, explicit-helper exact-main read-only Git, and runner identity/email interfaces all passed at the new identity and final boundary | The enrollment design can treat changed bytes as untrusted, requalify them, and safely refresh only after all checks pass. |
 | Existing-project clone | A disposable `amp clone user-skills` succeeded with exact Amp HTTPS origin shape. Repository-local helper, `useHttpPath`, author name, and author email were unset; the effective helper was `!amp git-credential-helper` with default-false `useHttpPath`. | Mac behavior differs from the Orb observation and must have its own target contract. Publication requires the user to configure a repository-local author. |
 | Isolated authenticated Git | Read-only `ls-remote` succeeded with the absolute Amp helper, system/global Git configuration disabled, and only `HOME`, `PATH`, `GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL`, and `GIT_TERMINAL_PROMPT` retained | Freeze this Mac allowlist for the observed direct-install/helper shape; revalidate executable identity immediately before use and expose it only to exact Amp HTTPS origins. |
 | Local Amp interfaces | The authenticated runner context supplied exact current-thread ID/URL, current-user identity, and owner-bound `send_email`; no email was sent | The existing skill model is feasible: retain thread identity in memory, pass it to `kb`, and request email only after preservation. End-to-end behavior remains a later implementation gate. `amp tools list` is not authoritative for agent server-side tools. |
@@ -101,10 +103,9 @@ or local helper environment.
 
 Before implementation begins, Phase 1 must:
 
-1. Run the local Amp helper/layout/update/thread-identity/email checks below on
-   each retained target. On Linux and Mac, only ordinary-update requalification
-   remains; local helper, filesystem, database, consumer-bootstrap, and runner-
-   interface feasibility passed.
+1. Complete ordinary-update requalification on Linux. Mac ordinary-update,
+   local helper, filesystem, database, consumer-bootstrap, and runner-interface
+   feasibility passed.
 2. Freeze each retained target's minimum OS, filesystem, exact source-free
    consumer bootstrap tools and versions, exact local Amp environment
    allowlist, and disposable PostgreSQL/pgvector feasibility harness from

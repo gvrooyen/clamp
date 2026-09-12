@@ -175,7 +175,7 @@ The target matrix is gated rather than inferred from Amp CLI support:
 | Target | 0.2.0 state | Required qualification |
 | --- | --- | --- |
 | Linux x86-64, glibc 2.36 or newer, local ext4 | Candidate | Native non-Orb testing passed ext4 primitives, source-free consumer bootstrap, an exact-project Amp clone with isolated authenticated read-only Git, authenticated local-runner thread/owner-email interfaces, and a private PostgreSQL 15.19/pgvector 0.8.1 harness. Support remains gated on ordinary-update requalification plus later runtime/package, durability, and end-to-end evidence. |
-| Apple-silicon macOS 26.5.2 or newer | Candidate | Native macOS 26.5.2 arm64 testing passed local writable case-insensitive APFS primitives, source-free consumer bootstrap, an exact-project Amp clone with isolated authenticated read-only Git, authenticated local-runner thread/owner-email interfaces, and a private PostgreSQL 15.19/pgvector 0.8.1 harness. No support is inferred for older macOS, and support remains gated on ordinary-update requalification plus later native runtime/package, signing, durability, and end-to-end evidence. |
+| Apple-silicon macOS 26.5.2 or newer | Candidate | Native macOS 26.5.2 arm64 testing passed local writable case-insensitive APFS primitives, source-free consumer bootstrap, an exact-project Amp clone with isolated authenticated read-only Git, authenticated local-runner thread/owner-email interfaces, ordinary-update requalification, and a private PostgreSQL 15.19/pgvector 0.8.1 harness. No support is inferred for older macOS; later native runtime/package, signing, durability, and end-to-end evidence remain release gates. |
 
 Every other architecture, operating system, Linux libc, and filesystem is
 unsupported for 0.2.0 unless deliberately added to this table with equivalent
@@ -210,8 +210,15 @@ helper was `!amp git-credential-helper` with default-false `useHttpPath`.
 Reconstructing that helper with the validated absolute Amp path supported a
 read-only exact-origin operation under only `HOME`, `PATH`,
 `GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL`, and `GIT_TERMINAL_PROMPT`.
-Ordinary-update behavior remains unqualified and requires target-specific
-evidence.
+Mac ordinary-update behavior is qualified by the owner's report that the runner
+had updated in response to instructions to wait for an ordinary natural update
+without forcing or reinstalling, an updater-success event aligned with
+replacement of the recorded prior executable, official checksums for both
+identities, and successful repetition of retained-path, helper, clone, read-only
+Git, and runner-interface checks. Qualification accepts this contextual owner
+attestation together with updater-correlated local evidence; the log did not
+independently distinguish automatic from manual updater invocation. Linux
+ordinary-update behavior remains pending.
 
 The authenticated Linux and Mac runner contexts supplied exact current-thread
 ID/URL, current-user identity, and Amp's owner-bound `send_email` capability.

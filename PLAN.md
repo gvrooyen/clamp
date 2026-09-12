@@ -165,7 +165,7 @@ requiring PRD review and migration/reindex planning.
 **Status: in progress.** The repository-owned contract, sanitized fixtures,
 tests, and immutable-0.1.4 prepublication compatibility mechanism are
 implemented and Oracle-reviewed with no repository-owned blockers. Native
-Linux and Apple-silicon macOS ordinary-update requalification remain pending.
+Linux ordinary-update requalification remains pending; Mac passed it.
 Native ext4/APFS, source-free consumer bootstrap, isolated authenticated read-
 only Amp Git, local-runner identity/notification interfaces, and disposable
 database feasibility have passed on both candidate targets. Native runtime/package,

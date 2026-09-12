@@ -704,29 +704,47 @@ let target_and_environment_fixtures () =
     List.find (fun value -> string "name" value = "local_macos_arm64") auth
   in
   Alcotest.(check string) "Mac aggregate state"
-    "candidate_pending_ordinary_update" (string "state" mac_auth);
+    "qualified_ordinary_update" (string "state" mac_auth);
   Alcotest.(check string) "Mac read-only clone qualification"
     "passed_user_skills_read_only"
     (string "amp_clone_existing_project" mac_auth);
   Alcotest.(check string) "Mac Amp minimum"
     "0.0.1789113641-gcd8b8a"
     (string "minimum_supported_amp_version" mac_auth);
+  Alcotest.(check (list string)) "Mac ordinary update identities"
+    [ "0.0.1789113641-gcd8b8a";
+      "3c9371af1bed55f8fec8f03fe72f0e06f9aec97f671ee2338e131d1fb938d37d";
+      "0.0.1789171288-gd95a61";
+      "9b3c6eb26ccaa94d3c0d016d0a82e48c6d79d117d0559854e4ae752d09b321eb" ]
+    [ string "previous_amp_version" mac_auth;
+      string "previous_amp_sha256" mac_auth;
+      string "observed_amp_version" mac_auth;
+      string "observed_amp_sha256" mac_auth ];
+  Alcotest.(check bool) "Mac prior checksum matched" true
+    (bool "previous_official_checksum_matched" mac_auth);
+  Alcotest.(check bool) "Mac current checksum matched" true
+    (bool "official_checksum_matched" mac_auth);
   Alcotest.(check string) "Mac helper is reconstructed explicitly"
     "!amp git-credential-helper" (string "clone_effective_helper_shape" mac_auth);
   Alcotest.(check string) "Mac qualified absolute helper"
     "!$HOME/.amp/bin/amp git-credential-helper"
     (string "qualified_explicit_helper_shape" mac_auth);
-  Alcotest.(check bool) "Mac helper does not use HTTP path" false
+  Alcotest.(check bool) "Mac ambient clone helper does not use HTTP path" false
     (bool "clone_use_http_path" mac_auth);
+  Alcotest.(check bool) "Mac qualified helper uses HTTP path" true
+    (bool "qualified_use_http_path" mac_auth);
   Alcotest.(check bool) "Mac clone writes no author" false
     (bool "clone_writes_repository_author" mac_auth);
   Alcotest.(check (list string)) "Mac helper environment allowlist"
     [ "HOME"; "PATH"; "GIT_CONFIG_NOSYSTEM"; "GIT_CONFIG_GLOBAL";
       "GIT_TERMINAL_PROMPT" ]
     (member "credential_environment_allowlist" mac_auth |> strings);
-  Alcotest.(check string) "Mac ordinary update remains pending"
-    "pending_no_authoritative_prior_executable_identity"
+  Alcotest.(check string) "Mac ordinary update passed"
+    "passed_user_attested_updater_correlated_replacement"
     (string "ordinary_update_state" mac_auth);
+  Alcotest.(check string) "Mac post-update regression passed"
+    "passed_path_helper_clone_read_only_git_and_runner_interfaces"
+    (string "ordinary_update_regression" mac_auth);
   let targets = member "release_targets" environment_fixture |> records in
   Alcotest.(check (list string)) "exact target set"
     [ "linux-x86_64"; "macos-arm64" ] (List.map (string "target") targets);
