@@ -21,7 +21,8 @@ let runtime_root root =
   let templates = Filename.concat root "share/clamp/templates" in
   let source = Filename.concat source_root "runtime/templates" in
   mkdirs templates;
-  [ "setup"; "resume"; "skill.md"; "AGENTS.md"; "README.md"; "gitignore" ]
+  [ "setup"; "resume"; "runtime_metadata.py"; "skill.md"; "AGENTS.md";
+    "README.md"; "gitignore" ]
   |> List.iter (fun name ->
          write (Filename.concat templates name)
            (read (Filename.concat source name)));
@@ -95,6 +96,44 @@ let complete_private_repository () =
          ^ "sha256=" ^ String.make 64 'a' ^ "\n")
         (read (Filename.concat target ".agents/clamp-runtime.lock")))
 
+let complete_v2_repository () =
+  let parent = Filename.temp_file "clamp-init-v2-" "" in
+  Sys.remove parent;
+  Unix.mkdir parent 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Sys.command ("rm -rf -- " ^ Filename.quote parent)))
+    (fun () ->
+      let templates = runtime_root (Filename.concat parent "runtime") in
+      let target = Filename.concat parent "private-clamp" in
+      let manifest_url =
+        "https://github.com/gvrooyen/clamp/releases/download/v0.2.0/clamp-0.2.0-runtime-manifest.json"
+      and manifest_sha256 = String.make 64 'b' in
+      let created =
+        check_ok
+          (Clamp.Initializer.create_v2 ~target
+             ~source_repository:"example.invalid/owner/private-clamp"
+             ~runtime_version:"0.2.0"
+             ~runtime_revision:"0123456789abcdef0123456789abcdef01234567"
+             ~manifest_url ~manifest_sha256 ~runtime_root:templates ())
+      in
+      Alcotest.(check string) "v2 repository path" target created.path;
+      let lock = read (Filename.concat target ".agents/clamp-runtime.lock") in
+      Alcotest.(check string) "canonical v2 lock"
+        (Printf.sprintf
+           {|{"schema_version":2,"version":"0.2.0","revision":"0123456789abcdef0123456789abcdef01234567","manifest_url":"%s","manifest_sha256":"%s"}
+|}
+           manifest_url manifest_sha256)
+        lock;
+      Alcotest.(check bool) "generated v2 lock parses on Mac" true
+        (Result.is_ok
+           (Clamp.Runtime_metadata.parse_lock ~target:"macos-arm64" lock));
+      Alcotest.(check int) "v2 repository has one commit" 0
+        (Sys.command
+           (Printf.sprintf
+              "test \"$(git -C %s rev-list --count HEAD)\" = 1"
+              (Filename.quote target))))
+
 let rejects_without_side_effects () =
   let parent = Filename.temp_file "clamp-init-invalid-" "" in
   Sys.remove parent;
@@ -140,5 +179,7 @@ let () =
     [ ("init",
        [ Alcotest.test_case "complete source-free repository" `Quick
            complete_private_repository;
+         Alcotest.test_case "complete v2 source-free repository" `Quick
+           complete_v2_repository;
          Alcotest.test_case "invalid and existing targets" `Quick
            rejects_without_side_effects ]) ]

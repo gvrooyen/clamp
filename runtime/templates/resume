@@ -3,21 +3,21 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 runtime_lock="$repo_root/.agents/clamp-runtime.lock"
+runtime_metadata="$repo_root/.agents/runtime_metadata.py"
 postgres_major=15
 local_database=clamp_test
 expected_socket_dir=/var/run/postgresql
 expected_data_directory=/var/lib/postgresql/15/main
 
-mapfile -t runtime_lock_lines < "$runtime_lock"
-if (( ${#runtime_lock_lines[@]} != 4 )) \
-   || [[ ! "${runtime_lock_lines[0]}" =~ ^version=[0-9A-Za-z.-]{1,64}$ ]] \
-   || [[ ! "${runtime_lock_lines[1]}" =~ ^revision=[0-9a-f]{40}$ ]] \
-   || [[ ! "${runtime_lock_lines[2]}" =~ ^url=https://[^@[:space:]]{1,2039}$ ]] \
-   || [[ ! "${runtime_lock_lines[3]}" =~ ^sha256=[0-9a-f]{64}$ ]]; then
+if [[ ! -f "$runtime_metadata" || -L "$runtime_metadata" ]] \
+   || ! mapfile -t runtime_lock_lines < <(
+        python3 "$runtime_metadata" lock "$runtime_lock" linux-x86_64
+      ) \
+   || (( ${#runtime_lock_lines[@]} != 5 )); then
   echo '[clamp resume] public runtime lock is invalid; rerun .agents/setup after repairing it' >&2
   exit 1
 fi
-cli_revision="${runtime_lock_lines[1]#revision=}"
+cli_revision="${runtime_lock_lines[2]}"
 expected_cli="$HOME/.local/share/clamp/kb/$cli_revision/bin/kb"
 installed_marker="$HOME/.local/share/clamp/kb/$cli_revision/REVISION"
 selected_cli="$(command -v kb 2>/dev/null || true)"

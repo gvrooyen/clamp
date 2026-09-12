@@ -1,5 +1,9 @@
 let get_ok = function Ok value -> value | Error error -> Alcotest.fail error.Clamp.Upgrade.code
 
+let metadata_ok = function
+  | Ok value -> value
+  | Error error -> Alcotest.fail error.Clamp.Runtime_metadata.code
+
 let write ?(mode = 0o644) path contents =
   let channel = open_out_bin path in
   Fun.protect
@@ -52,6 +56,22 @@ let release_layout root version =
   write (Filename.concat root "THIRD_PARTY_NOTICES") "notices\n";
   write (Filename.concat root "VERSION") (version ^ "\n");
   write (Filename.concat root "REVISION") (fixture_revision ^ "\n")
+
+let rec mkdirs path =
+  if path <> Filename.dirname path && not (Sys.file_exists path) then begin
+    mkdirs (Filename.dirname path);
+    Unix.mkdir path 0o755
+  end
+
+let manifest_release_layout root version =
+  release_layout root version;
+  Clamp.Runtime_metadata.mandatory_files
+  |> List.iter (fun relative ->
+         let path = Filename.concat root relative in
+         if not (Sys.file_exists path) then begin
+           mkdirs (Filename.dirname path);
+           write path (relative ^ "\n")
+         end)
 
 let version_contract () =
   let valid = Clamp.Upgrade.For_test.valid_version in
@@ -211,6 +231,161 @@ let atomic_install () =
              Alcotest.(check bool) ("no updater residue: " ^ name) false
                (String.starts_with ~prefix:".clamp-upgrade-" name)))
 
+let portable_metadata_contract () =
+  let module Metadata = Clamp.Runtime_metadata in
+  let version = "0.2.0" in
+  let revision = fixture_revision in
+  let make_target target digest size : Metadata.target =
+    { target;
+      archive_url =
+        "https://github.com/gvrooyen/clamp/releases/download/v0.2.0/"
+        ^ Metadata.archive_name ~version ~target;
+      archive_sha256 = digest;
+      archive_root = "clamp-0.2.0-" ^ target;
+      archive_size = size;
+      required_files = Metadata.mandatory_files }
+  in
+  let digest = String.make 64 'a' in
+  let manifest : Metadata.manifest =
+    { version; revision;
+      targets =
+        [ make_target "linux-x86_64" digest 1024;
+          make_target "macos-arm64" digest 2048 ] }
+  in
+  let serialized = metadata_ok (Metadata.serialize_manifest manifest) in
+  Alcotest.(check string) "deterministic manifest" serialized
+    (metadata_ok (Metadata.serialize_manifest manifest));
+  let parsed =
+    metadata_ok (Metadata.parse_manifest ~expected_version:version serialized)
+  in
+  Alcotest.(check string) "exact Mac selection" "macos-arm64"
+    (metadata_ok (Metadata.select_target parsed "macos-arm64")).target;
+  Alcotest.(check string) "no target fallback" "runtime_manifest_target_missing"
+    (match Metadata.select_target parsed "linux-arm64" with
+    | Error error -> error.code
+    | Ok _ -> Alcotest.fail "unknown target selected");
+  let manifest_url, _ = Metadata.manifest_urls ~version in
+  let lock : Metadata.v2_lock =
+    { version; revision; manifest_url; manifest_sha256 = digest }
+  in
+  let lock = Metadata.serialize_lock lock in
+  List.iter
+    (fun target ->
+      Alcotest.(check bool) ("v2 lock on " ^ target) true
+        (Result.is_ok (Metadata.parse_lock ~target lock)))
+    Metadata.accepted_targets;
+  let v1 =
+    "version=0.1.4\nrevision=" ^ revision
+    ^ "\nurl=https://github.com/gvrooyen/clamp/releases/download/v0.1.4/clamp-0.1.4-linux-x86_64.tar.gz\nsha256="
+    ^ digest ^ "\n"
+  in
+  Alcotest.(check bool) "v1 Linux lock retained" true
+    (Result.is_ok (Metadata.parse_lock ~target:"linux-x86_64" v1));
+  Alcotest.(check string) "v1 Mac migration required" "runtime_lock_v2_invalid"
+    (match Metadata.parse_lock ~target:"macos-arm64" v1 with
+    | Error error -> error.code
+    | Ok _ -> Alcotest.fail "v1 lock accepted on Mac");
+  let duplicate =
+    Str.replace_first (Str.regexp_string {|"schema_version":1|})
+      {|"schema_version":1,"schema_version":1|} serialized
+  in
+  Alcotest.(check bool) "duplicate key rejected" true
+    (Result.is_error (Metadata.parse_manifest ~expected_version:version duplicate));
+  let unknown_target =
+    Str.replace_first (Str.regexp_string "macos-arm64") "linux-arm64" serialized
+  in
+  Alcotest.(check bool) "unknown manifest target rejected" true
+    (Result.is_error
+       (Metadata.parse_manifest ~expected_version:version unknown_target));
+  Alcotest.(check string) "oversized manifest code" "runtime_manifest_too_large"
+    (match
+       Metadata.parse_manifest ~expected_version:version
+         (String.make (Metadata.maximum_manifest_bytes + 1) ' ')
+     with
+    | Error error -> error.code
+    | Ok _ -> Alcotest.fail "oversized manifest accepted")
+
+let portable_tar_listing () =
+  let safe = Clamp.Upgrade.For_test.archive_sizes_safe ~maximum:4L in
+  Alcotest.(check bool) "GNU tar regular and directory" true
+    (safe
+       "drwxr-xr-x 0/0 0 2026-09-12 09:14 root/\n-rw-r--r-- 0/0 4 2026-09-12 09:14 root/file\n");
+  Alcotest.(check bool) "macOS bsdtar regular and directory" true
+    (safe
+       "drwxr-xr-x 0 502 0 0 Sep 12 11:13 root/\n-rw-r--r-- 0 502 0 4 Sep 12 11:13 root/file\n");
+  Alcotest.(check bool) "macOS size is fifth token" false
+    (Clamp.Upgrade.For_test.archive_sizes_safe ~maximum:3L
+       "-rw-r--r-- 0 0 0 4 Sep 12 11:13 root/file\n");
+  List.iter
+    (fun mode ->
+      Alcotest.(check bool) ("reject archive type " ^ mode) false
+        (safe (mode ^ " 0 0 0 0 Sep 12 11:13 root/link\n")))
+    [ "lrwxr-xr-x"; "hrw-r--r--" ]
+
+let verified_manifest_archive () =
+  with_directory (fun parent ->
+      let module Metadata = Clamp.Runtime_metadata in
+      let version = "0.2.0" and target = "linux-x86_64" in
+      let archive_root = "clamp-0.2.0-linux-x86_64" in
+      let source = Filename.concat parent "source" in
+      Unix.mkdir source 0o700;
+      manifest_release_layout (Filename.concat source archive_root) version;
+      let archive_path = Filename.concat parent (archive_root ^ ".tar.gz") in
+      let command =
+        Printf.sprintf "/usr/bin/tar -C %s -czf %s %s"
+          (Filename.quote source) (Filename.quote archive_path)
+          (Filename.quote archive_root)
+      in
+      Alcotest.(check int) "manifest fixture archive" 0 (Sys.command command);
+      let archive = read archive_path in
+      let digest = Digestif.SHA256.(to_hex (digest_string archive)) in
+      let record : Metadata.target =
+        { target;
+          archive_url =
+            "https://github.com/gvrooyen/clamp/releases/download/v0.2.0/"
+            ^ Metadata.archive_name ~version ~target;
+          archive_sha256 = digest; archive_root;
+          archive_size = String.length archive;
+          required_files = Metadata.mandatory_files }
+      in
+      let manifest =
+        metadata_ok
+          (Metadata.serialize_manifest
+             { version; revision = fixture_revision; targets = [ record ] })
+      in
+      let manifest_sha256 = Digestif.SHA256.(to_hex (digest_string manifest)) in
+      let resolved =
+        get_ok
+          (Clamp.Upgrade.For_test.with_manifest_release ~target ~version ~manifest
+             ~manifest_sha256 ~archive Fun.id)
+      in
+      Alcotest.(check string) "manifest release target" target resolved.target;
+      Alcotest.(check string) "manifest release revision" fixture_revision
+        resolved.revision;
+      Alcotest.(check (option string)) "manifest lock URL"
+        (Some
+           "https://github.com/gvrooyen/clamp/releases/download/v0.2.0/clamp-0.2.0-runtime-manifest.json")
+        resolved.manifest_url;
+      Alcotest.(check string) "manifest checksum mismatch"
+        "runtime_manifest_checksum_mismatch"
+        (match
+           Clamp.Upgrade.For_test.with_manifest_release ~target ~version ~manifest
+             ~manifest_sha256:(String.make 64 '0') ~archive Fun.id
+         with
+        | Error error -> error.code
+        | Ok _ -> Alcotest.fail "bad manifest checksum accepted");
+      Alcotest.(check string) "archive checksum mismatch"
+        "runtime_archive_checksum_mismatch"
+        (let changed_archive = Bytes.of_string archive in
+         Bytes.set changed_archive 0
+           (if Bytes.get changed_archive 0 = '\000' then '\001' else '\000');
+         match
+           Clamp.Upgrade.For_test.with_manifest_release ~target ~version ~manifest
+             ~manifest_sha256 ~archive:(Bytes.unsafe_to_string changed_archive) Fun.id
+         with
+        | Error error -> error.code
+        | Ok _ -> Alcotest.fail "bad archive accepted"))
+
 let () =
   Alcotest.run "Clamp release upgrade"
     [ ( "upgrade",
@@ -218,4 +393,9 @@ let () =
           Alcotest.test_case "checksum contract" `Quick checksum_contract;
           Alcotest.test_case "verified release metadata" `Quick
             resolved_release_archive;
-          Alcotest.test_case "verified atomic installation" `Quick atomic_install ] ) ]
+          Alcotest.test_case "verified atomic installation" `Quick atomic_install;
+          Alcotest.test_case "portable metadata contract" `Quick
+            portable_metadata_contract;
+          Alcotest.test_case "portable tar listing" `Quick portable_tar_listing;
+          Alcotest.test_case "verified manifest archive" `Quick
+            verified_manifest_archive ] ) ]

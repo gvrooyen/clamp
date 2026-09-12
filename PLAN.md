@@ -220,6 +220,13 @@ prerequisites. No local target is supported yet.
 
 ## Phase 2: Portable runtime metadata and release selection
 
+**Status: complete.** The strict native and bootstrap parsers, target-aware
+release preparation and standalone upgrade path, online and offline initializer,
+deterministic manifest generator, guarded multi-target publication inputs, and
+cross-target template checks are implemented with repository-owned acceptance
+evidence. Final native archive and immutable-v0.1.4 compatibility checks remain
+release gates, not Phase 2 implementation work.
+
 ### Design
 
 Replace the single-target four-line runtime lock with a versioned v2 lock that

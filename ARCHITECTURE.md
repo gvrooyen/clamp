@@ -119,6 +119,15 @@ previous executable when verification or installation fails. Release/latest
 initialization uses the selected package's templates; explicit version,
 revision, URL, and digest pins support offline and controlled initialization.
 
+`Runtime_metadata` owns the portable v2 lock and release-manifest grammar,
+limits, deterministic serialization, and exact target selection. `Upgrade`
+owns target detection, fixed-source downloads, checksum and archive validation,
+candidate execution, and atomic standalone replacement. `Initializer` consumes
+only a prepared verified release and atomically emits either the legacy lock or
+canonical v2 lock with that release's templates. The tracked Python bootstrap
+parser enforces the same metadata acceptance rules before `kb` is available;
+release generation verifies byte-identical templates across target archives.
+
 ### Planned 0.2 local execution boundary
 
 The planned 0.2 architecture preserves one native `kb` implementation and one

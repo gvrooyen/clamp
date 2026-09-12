@@ -182,8 +182,8 @@ let preflight ~target ~source_repository =
       with _ ->
         error "init_parent_invalid" "The repository parent is not a safe directory."
 
-let create ~target ~source_repository ~runtime_version ~runtime_revision
-    ~runtime_url ~runtime_sha256 ?runtime_root:root () =
+let create_internal ~target ~source_repository ~runtime_version ~runtime_revision
+    ~runtime_url ~runtime_sha256 ?lock ?runtime_root:root () =
   if not (Config.valid_source_repository source_repository) then
     error "source_repository_invalid" "The source repository identity is invalid."
   else if not (version runtime_version) then
@@ -209,6 +209,7 @@ let create ~target ~source_repository ~runtime_version ~runtime_revision
       let templates =
         [ ("setup", ".agents/setup", 0o700);
           ("resume", ".agents/resume", 0o700);
+          ("runtime_metadata.py", ".agents/runtime_metadata.py", 0o600);
           ("skill.md", ".agents/skills/managing-clamp-knowledge/SKILL.md", 0o600);
           ("AGENTS.md", "AGENTS.md", 0o600);
           ("README.md", "README.md", 0o600);
@@ -246,9 +247,12 @@ let create ~target ~source_repository ~runtime_version ~runtime_revision
                         write_file ~mode (Filename.concat staged destination) contents)
                       templates;
                     let lock =
-                      Printf.sprintf
-                        "version=%s\nrevision=%s\nurl=%s\nsha256=%s\n"
-                        runtime_version runtime_revision runtime_url runtime_sha256
+                      Option.value lock
+                        ~default:
+                          (Printf.sprintf
+                             "version=%s\nrevision=%s\nurl=%s\nsha256=%s\n"
+                             runtime_version runtime_revision runtime_url
+                             runtime_sha256)
                     in
                     write_file (Filename.concat staged ".agents/clamp-runtime.lock") lock;
                     write_file (Filename.concat staged "clamp.yaml")
@@ -280,3 +284,22 @@ let create ~target ~source_repository ~runtime_version ~runtime_revision
                         (match failure with
                         | Failure message -> message
                         | _ -> "The private repository could not be initialized."))))
+
+let create ~target ~source_repository ~runtime_version ~runtime_revision
+    ~runtime_url ~runtime_sha256 ?runtime_root () =
+  create_internal ~target ~source_repository ~runtime_version ~runtime_revision
+    ~runtime_url ~runtime_sha256 ?runtime_root ()
+
+let create_v2 ~target ~source_repository ~runtime_version ~runtime_revision
+    ~manifest_url ~manifest_sha256 ?runtime_root () =
+  let metadata : Runtime_metadata.v2_lock =
+    { version = runtime_version; revision = runtime_revision; manifest_url;
+      manifest_sha256 }
+  in
+  let lock = Runtime_metadata.serialize_lock metadata in
+  match Runtime_metadata.parse_lock ~target:"linux-x86_64" lock with
+  | Error failure -> error failure.code failure.message
+  | Ok _ ->
+      create_internal ~target ~source_repository ~runtime_version
+        ~runtime_revision ~runtime_url:manifest_url
+        ~runtime_sha256:manifest_sha256 ~lock ?runtime_root ()

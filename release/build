@@ -41,6 +41,7 @@ install -m 0755 runtime/templates/setup runtime/templates/resume \
   "$stage/share/clamp/templates/"
 install -m 0644 runtime/templates/skill.md runtime/templates/AGENTS.md \
   runtime/templates/README.md runtime/templates/gitignore \
+  runtime/templates/runtime_metadata.py \
   "$stage/share/clamp/templates/"
 printf '%s\n' "$revision" >"$stage/REVISION"
 printf '%s\n' "$version" >"$stage/VERSION"
@@ -159,3 +160,10 @@ tar --sort=name --format=posix \
 
 printf 'Built %s\n' "$archive"
 cat "$archive.sha256"
+
+archives=()
+for candidate in "$dist/clamp-$version-linux-x86_64.tar.gz" \
+  "$dist/clamp-$version-macos-arm64.tar.gz"; do
+  [[ -f "$candidate" ]] && archives+=("$candidate")
+done
+"$repo_root/release/manifest" "$version" "$revision" "${archives[@]}"

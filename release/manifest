@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+import hashlib
+import json
+import pathlib
+import re
+import sys
+import tarfile
+
+MAX_ARCHIVE = 64 * 1024 * 1024
+TARGETS = {"linux-x86_64", "macos-arm64"}
+REQUIRED = [
+    "LICENSE", "README.txt", "REVISION", "THIRD_PARTY_NOTICES", "VERSION",
+    "bin/kb", "share/clamp/migrations/0001_enable_vector.sql",
+    "share/clamp/migrations/0002_application_schema.sql",
+    "share/clamp/templates/AGENTS.md", "share/clamp/templates/README.md",
+    "share/clamp/templates/gitignore", "share/clamp/templates/resume",
+    "share/clamp/templates/runtime_metadata.py", "share/clamp/templates/setup",
+    "share/clamp/templates/skill.md",
+]
+
+
+def fail(message):
+    raise SystemExit(message)
+
+
+if len(sys.argv) < 4:
+    fail("usage: release/manifest VERSION REVISION ARCHIVE...")
+version, revision, *archive_names = sys.argv[1:]
+if not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version):
+    fail("invalid version")
+if not re.fullmatch(r"[0-9a-f]{40}", revision):
+    fail("invalid revision")
+
+records = []
+template_identity = None
+for archive_name in archive_names:
+    archive = pathlib.Path(archive_name)
+    match = re.fullmatch(rf"clamp-{re.escape(version)}-(linux-x86_64|macos-arm64)\.tar\.gz", archive.name)
+    if not match or match.group(1) not in TARGETS or not archive.is_file() or archive.is_symlink():
+        fail(f"invalid target archive: {archive}")
+    target = match.group(1)
+    raw = archive.read_bytes()
+    if not 0 < len(raw) <= MAX_ARCHIVE:
+        fail(f"archive size is invalid: {archive}")
+    root = f"clamp-{version}-{target}"
+    files = {}
+    entries = set()
+    total = 0
+    with tarfile.open(archive, "r:gz") as bundle:
+        for member in bundle.getmembers():
+            name = member.name.rstrip("/")
+            parts = name.split("/")
+            if (not parts or parts[0] != root or any(
+                    not re.fullmatch(r"[A-Za-z0-9._+-]+", part) for part in parts)):
+                fail(f"unsafe archive path: {archive}")
+            if not (member.isdir() or member.isfile()) or member.issym() or member.islnk():
+                fail(f"unsafe archive entry: {archive}")
+            if name in entries:
+                fail(f"duplicate archive entry: {archive}")
+            entries.add(name)
+            if member.isfile():
+                relative = name[len(root) + 1:]
+                extracted = bundle.extractfile(member)
+                if extracted is None:
+                    fail(f"unreadable archive entry: {archive}")
+                contents = extracted.read()
+                if len(contents) != member.size:
+                    fail(f"short archive entry: {archive}")
+                files[relative] = contents
+                total += member.size
+    if total > MAX_ARCHIVE or not set(REQUIRED).issubset(files):
+        fail(f"incomplete or oversized archive: {archive}")
+    if files["VERSION"] != (version + "\n").encode() or files["REVISION"] != (revision + "\n").encode():
+        fail(f"archive marker mismatch: {archive}")
+    templates = {
+        name: hashlib.sha256(contents).hexdigest()
+        for name, contents in files.items()
+        if name.startswith("share/clamp/templates/")
+    }
+    if template_identity is None:
+        template_identity = templates
+    elif templates != template_identity:
+        fail("target archives contain different repository templates")
+    digest = hashlib.sha256(raw).hexdigest()
+    checksum = archive.with_name(archive.name + ".sha256")
+    expected_checksum = f"{digest}  {archive.name}\n".encode()
+    if not checksum.is_file() or checksum.is_symlink() or checksum.read_bytes() != expected_checksum:
+        fail(f"archive checksum file mismatch: {archive}")
+    records.append({
+        "target": target,
+        "archive_url": f"https://github.com/gvrooyen/clamp/releases/download/v{version}/{archive.name}",
+        "archive_sha256": digest,
+        "archive_root": root,
+        "archive_size": len(raw),
+        "required_files": REQUIRED,
+    })
+
+records.sort(key=lambda value: value["target"])
+if len({record["target"] for record in records}) != len(records) or len(records) > 16:
+    fail("duplicate or excessive target archives")
+manifest = {
+    "schema_version": 1,
+    "version": version,
+    "revision": revision,
+    "targets": records,
+}
+output = pathlib.Path(archive_names[0]).parent / f"clamp-{version}-runtime-manifest.json"
+contents = (json.dumps(manifest, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
+if len(contents) > 1024 * 1024:
+    fail("manifest exceeds 1 MiB")
+output.write_bytes(contents)
+digest = hashlib.sha256(contents).hexdigest()
+output.with_name(output.name + ".sha256").write_text(
+    f"{digest}  {output.name}\n", encoding="ascii", newline="\n")
+print(output)

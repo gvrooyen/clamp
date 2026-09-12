@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 version="$(sed -nE 's/^\(version ([^)]+)\)$/\1/p' "$repo_root/dune-project")"
 tag="v$version"
 archive="clamp-$version-linux-x86_64.tar.gz"
+manifest="clamp-$version-runtime-manifest.json"
 
 cd "$repo_root"
 [[ -z "$(git status --porcelain)" ]]
@@ -14,7 +15,19 @@ remote_tag="$(git ls-remote --exit-code origin "refs/tags/$tag^{}" | awk 'NR == 
 [[ "$head" == "$(git rev-list -n1 "$tag")" ]]
 [[ "$head" == "$remote_tag" ]]
 [[ "$head" == "$remote_main" ]]
-(cd dist && sha256sum --check "$archive.sha256")
+archives=()
+for candidate in "dist/clamp-$version-linux-x86_64.tar.gz" \
+  "dist/clamp-$version-macos-arm64.tar.gz"; do
+  [[ -f "$candidate" ]] && archives+=("$candidate")
+done
+[[ -f "dist/$archive" ]]
+"$repo_root/release/manifest" "$version" "$head" "${archives[@]}" >/dev/null
+assets=("dist/$manifest" "dist/$manifest.sha256")
+for candidate in "${archives[@]}"; do
+  (cd dist && sha256sum --check "$(basename "$candidate").sha256")
+  assets+=("$candidate" "$candidate.sha256")
+done
+(cd dist && sha256sum --check "$manifest.sha256")
 
 if gh release view "$tag" >/dev/null 2>&1; then
   printf 'GitHub release %s already exists.\n' "$tag" >&2
@@ -22,6 +35,5 @@ if gh release view "$tag" >/dev/null 2>&1; then
 fi
 
 gh release create "$tag" \
-  "dist/$archive" \
-  "dist/$archive.sha256" \
+  "${assets[@]}" \
   --verify-tag --title "Clamp $version" --generate-notes

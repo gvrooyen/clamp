@@ -227,6 +227,43 @@ helper, clone, read-only Git, and runner-interface checks. Hourly same-process
 events strongly support background initiation, but the logs contain no explicit
 automatic/manual trigger field, so no stronger trigger claim is made.
 
+### Portable runtime metadata
+
+Releases from 0.2.0 use a canonical UTF-8 JSON v2 runtime lock. Its exact keys,
+in order, are `schema_version` (integer `2`), stable `version`, 40-character
+lowercase hexadecimal `revision`, fixed credential-free GitHub
+`manifest_url`, and lowercase `manifest_sha256`. The lock is at most 8 KiB and
+ends with LF. Its manifest is named
+`clamp-<version>-runtime-manifest.json`; the adjacent checksum is that name plus
+`.sha256`. Both use the fixed `gvrooyen/clamp` GitHub release source.
+
+The canonical manifest has exact keys `schema_version` (integer `1`),
+`version`, `revision`, and `targets`. It is at most 1 MiB, has at most 16 unique
+target records sorted by target name, JSON depth at most 8, and at most 1,024
+nodes. Each target record has only `target`, `archive_url`, `archive_sha256`,
+`archive_root`, positive integer `archive_size`, and a sorted unique
+`required_files` list of at most 256 safe relative paths. URLs and roots must
+exactly match `clamp-<version>-<target>.tar.gz` for the record. Unknown or
+duplicate keys, non-integer numbers, unsupported JSON values, malformed UTF-8,
+unknown targets, and target fallback are rejected. Accepted identifiers are
+exactly `linux-x86_64` and `macos-arm64` while both remain release candidates.
+
+The manifest checksum is verified before selecting a record. The complete
+selected record is validated before downloading, extracting, or executing its
+archive. The authenticated archive size may tighten but cannot exceed 64 MiB;
+the extracted regular-file total cannot exceed 64 MiB. Every record includes
+the executable, markers, license/notices, migrations, and all generated
+repository templates. All target packages for one release contain byte-identical
+templates. Legacy four-line locks remain accepted only on Linux x86-64.
+
+`kb init --release` and `--latest` use this manifest for 0.2.0 and later.
+The offline v2 form requires exactly `--runtime-version`, `--runtime-target`,
+`--runtime-manifest`, `--runtime-manifest-sha256`, and `--runtime-archive`.
+It verifies all supplied bytes and selected-package markers before creating the
+repository and performs no DNS or download. The legacy four-pin form remains
+available for pre-0.2 Linux packages. Standalone `kb upgrade` selects only its
+detected target and rejects setup-managed installation roots.
+
 The authenticated Linux and Mac runner contexts supplied exact current-thread
 ID/URL, current-user identity, and Amp's owner-bound `send_email` capability.
 This qualifies the local-executor interface decision: the skill retains the
@@ -812,8 +849,9 @@ service.
 The CLI provides at least:
 
 - `kb init` – create a source-free private knowledge repository from an exact
-  or latest stable Linux x86-64 runtime release, or from four explicit runtime
-  pins, without creating or pushing a remote.
+  or latest stable runtime release, from the legacy four explicit Linux pins,
+  or from the verified five-option offline v2 manifest form, without creating
+  or pushing a remote.
 - `kb search <query>` – semantic search returning metadata and snippets.
 - `kb get <concept-id>` – return full concept content and record an access.
 - `kb add`, `kb edit`, `kb verify`, `kb deprecate` – concept mutations.
@@ -832,7 +870,7 @@ Commands offer machine-readable `--json` output so the skill can distinguish
 validation, conflict, authentication, network, and indexing failures without
 parsing prose.
 
-The public distribution also provides a Linux x86-64 runtime archive containing
+The v1 public distribution provides a Linux x86-64 runtime archive containing
 only the native executable, authoritative migrations, private-repository
 templates, license, and exact version/revision markers. `kb init --release`
 and `kb init --latest` securely resolve and verify a public archive, copy that
@@ -850,6 +888,9 @@ or make an embedding request during initialization or setup. Release-selection
 shortcuts make read-only requests only to the fixed public Clamp GitHub release
 source; explicit-pin initialization and generated setup perform no release
 metadata lookup.
+Release 0.2.0 adds the target archives, canonical manifest, v2 lock, and strict
+selection contract defined under “Portable runtime metadata” above; it does
+not change these v1 compatibility guarantees.
 
 The repo-local `managing-clamp-knowledge` Amp skill instructs an agent to:
 

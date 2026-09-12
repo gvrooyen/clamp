@@ -205,3 +205,19 @@ Phase 1 may be marked complete in [PLAN.md](./PLAN.md) only after all Phase 1
 native rows are resolved and Oracle's final implementation review gives a green
 light. Later-phase rows are intentionally not Phase 1 completion blockers; they
 remain release blockers.
+
+## 0.2.0 Phase 2 portable-runtime acceptance
+
+Phase 2 is repository-complete when `upgrade_test`, `initializer_test`,
+`v0_2_phase1_test`, and the `runtime_metadata_test.py` runtest rule pass. This
+evidence covers canonical v2 lock and manifest serialization, strict native and
+bootstrap parsing, legacy Linux lock compatibility, exact target selection with
+no fallback, checksum and archive validation, source-free atomic initialization,
+offline initialization without network lookup, deterministic multi-target
+manifest generation, and cross-target template identity enforcement.
+
+The 0.2 release gate additionally requires running the manifest generator over
+the final native target archives and exercising those legacy-named Linux bytes
+with the immutable reviewed 0.1.4 executable. That final-artifact compatibility
+check cannot be satisfied by development fixtures and remains operator evidence;
+it does not reopen the Phase 2 metadata implementation.

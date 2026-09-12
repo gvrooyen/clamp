@@ -49,6 +49,20 @@ Fresh-orb setup downloads and verifies exactly that archive, installs it under
 release, then rerun setup and `kb validate`. Commit and push the lock change
 with ordinary Git after review; `kb publish` does not publish `.agents/` files.
 
+Release 0.2.0 changes new pins to a canonical JSON v2 lock containing version,
+revision, fixed release-manifest URL, and manifest SHA-256. The verified
+manifest selects an exact `linux-x86_64` or `macos-arm64` archive record; there
+is no target fallback. Its public assets are
+`clamp-<version>-runtime-manifest.json` and the adjacent `.sha256`, plus each
+`clamp-<version>-<target>.tar.gz` and checksum. Pre-0.2 four-line locks remain
+valid only for Linux x86-64.
+
+For controlled offline 0.2 initialization, supply all of
+`--runtime-version`, `--runtime-target`, `--runtime-manifest`,
+`--runtime-manifest-sha256`, and `--runtime-archive`. Clamp verifies the local
+manifest and archive before creating the repository and performs no release
+lookup or download.
+
 Do not run `kb upgrade` on this setup-managed installation. It replaces the
 current release directory without editing the repository lock, which can make
 the directory's revision marker disagree with the pin and cause resume to
@@ -99,6 +113,7 @@ checks that:
 Only after those checks does it create the corresponding GitHub release and
 upload the archive and checksum. Never force-push a release tag or branch.
 
-The current release scripts are Linux x86-64-specific. See
-[Building Clamp](./building.md) before adding another operating system or
-architecture.
+The Linux builder and future native macOS builder produce target archives
+first. `release/manifest` then validates their markers, checksums, bounds, and
+byte-identical repository templates before writing one deterministic manifest.
+See [Building Clamp](./building.md) before adding another target.

@@ -236,10 +236,36 @@ let run_init_release request source_repository options =
   | Ok () ->
       Clamp.Upgrade.with_release request
         (fun (resolved : Clamp.Upgrade.release) ->
-          Clamp.Initializer.create ~target:options.repo_root ~source_repository
-            ~runtime_version:resolved.version
-            ~runtime_revision:resolved.revision ~runtime_url:resolved.url
-            ~runtime_sha256:resolved.sha256
+          match (resolved.manifest_url, resolved.manifest_sha256) with
+          | Some manifest_url, Some manifest_sha256 ->
+              Clamp.Initializer.create_v2 ~target:options.repo_root
+                ~source_repository ~runtime_version:resolved.version
+                ~runtime_revision:resolved.revision ~manifest_url
+                ~manifest_sha256 ~runtime_root:resolved.runtime_root ()
+          | None, None ->
+              Clamp.Initializer.create ~target:options.repo_root
+                ~source_repository ~runtime_version:resolved.version
+                ~runtime_revision:resolved.revision ~runtime_url:resolved.url
+                ~runtime_sha256:resolved.sha256
+                ~runtime_root:resolved.runtime_root ()
+          | _ -> assert false)
+      |> emit_init_release options
+
+let run_init_offline ~runtime_target ~runtime_version ~manifest_path
+    ~manifest_sha256 ~archive_path source_repository options =
+  match
+    Clamp.Initializer.preflight ~target:options.repo_root ~source_repository
+  with
+  | Error _ as failure -> emit_init options failure
+  | Ok () ->
+      Clamp.Upgrade.with_offline_release ~target:runtime_target
+        ~version:runtime_version ~manifest_path ~manifest_sha256 ~archive_path
+        (fun (resolved : Clamp.Upgrade.release) ->
+          Clamp.Initializer.create_v2 ~target:options.repo_root
+            ~source_repository ~runtime_version:resolved.version
+            ~runtime_revision:resolved.revision
+            ~manifest_url:(Option.get resolved.manifest_url)
+            ~manifest_sha256:(Option.get resolved.manifest_sha256)
             ~runtime_root:resolved.runtime_root ())
       |> emit_init_release options
 
@@ -274,10 +300,22 @@ let init =
     Arg.(value & opt (some string) None
       & info [ "runtime-root" ] ~docv:"PATH"
           ~doc:"Override the runtime root containing share/clamp/templates; intended for package tests.")
+  and runtime_target =
+    optional [ "runtime-target" ] "TARGET"
+      "Select the exact target from an explicitly supplied runtime manifest."
+  and runtime_manifest =
+    optional [ "runtime-manifest" ] "PATH"
+      "Read and verify an offline v2 runtime manifest from PATH."
+  and runtime_manifest_sha256 =
+    optional [ "runtime-manifest-sha256" ] "SHA256"
+      "Pin the lowercase SHA-256 digest of the offline runtime manifest."
+  and runtime_archive =
+    optional [ "runtime-archive" ] "PATH"
+      "Read the selected offline runtime archive from PATH."
   in
   let selection_error options =
     let message =
-      "Supply exactly one runtime selection: --release X.Y.Z, --latest, or all four explicit --runtime-* pin options."
+      "Supply exactly one runtime selection: --release X.Y.Z, --latest, the four legacy explicit archive pins, or --runtime-version with all four v2 offline manifest options."
     in
     let result =
       Clamp.Cli_result.failure ~exit_class:User_error
@@ -293,7 +331,8 @@ let init =
        "Create a complete private Clamp consumer repository without implementation source.")
     Term.(const
       (fun source_repository selected_release latest runtime_version
-           runtime_revision runtime_url runtime_sha256 runtime_root options ->
+           runtime_revision runtime_url runtime_sha256 runtime_root runtime_target
+           runtime_manifest runtime_manifest_sha256 runtime_archive options ->
         match
           ( selected_release,
             latest,
@@ -301,21 +340,36 @@ let init =
             runtime_revision,
             runtime_url,
             runtime_sha256,
-            runtime_root )
+            runtime_root,
+            runtime_target,
+            runtime_manifest,
+            runtime_manifest_sha256,
+            runtime_archive )
         with
-        | Some release, false, None, None, None, None, None ->
+        | Some release, false, None, None, None, None, None, None, None, None,
+          None ->
             run_init_release (Version release) source_repository options
-        | None, true, None, None, None, None, None ->
+        | None, true, None, None, None, None, None, None, None, None, None ->
             run_init_release Latest source_repository options
         | None, false, Some runtime_version, Some runtime_revision,
-          Some runtime_url, Some runtime_sha256, runtime_root ->
+          Some runtime_url, Some runtime_sha256, runtime_root, None, None, None,
+          None ->
             Clamp.Initializer.create ~target:options.repo_root ~source_repository
               ~runtime_version ~runtime_revision ~runtime_url ~runtime_sha256
               ?runtime_root ()
             |> emit_init options
+        | None, false, Some runtime_version, None, None, None, None,
+          Some runtime_target, Some runtime_manifest,
+          Some runtime_manifest_sha256, Some runtime_archive ->
+            run_init_offline ~runtime_target ~runtime_version
+              ~manifest_path:runtime_manifest
+              ~manifest_sha256:runtime_manifest_sha256
+              ~archive_path:runtime_archive source_repository options
         | _ -> selection_error options)
       $ source_repository $ selected_release $ latest $ runtime_version
       $ runtime_revision $ runtime_url $ runtime_sha256 $ runtime_root
+      $ runtime_target $ runtime_manifest $ runtime_manifest_sha256
+      $ runtime_archive
       $ common_options)
 
 let placeholder_term command operands =

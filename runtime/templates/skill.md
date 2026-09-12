@@ -12,12 +12,13 @@ the current directory to select the private repository. Git `origin/main` in
 that private repository is the only durable knowledge authority; Postgres is a
 derived index, and local Markdown is the non-semantic fallback.
 
-The CLI implementation comes only from the x86-64 runtime release named in
+The CLI implementation comes only from the exact target runtime selected by
 `/home/user/workspace/repo/.agents/clamp-runtime.lock`. `.agents/setup`
-verifies its pinned SHA-256, safely extracts its exact migrations and executable,
-and atomically activates it. Upgrade the private repository CLI only by
-reviewing and changing the tracked lock, then running setup; never build or
-install implementation sources in the private repository.
+verifies the pinned manifest and archive SHA-256 values, safely extracts the
+exact migrations and executable, and atomically activates it. Upgrade the
+private repository CLI only by reviewing and changing the tracked lock and
+manifest, then running setup; never build or install implementation sources in
+the private repository.
 
 ## Establish the session safely
 

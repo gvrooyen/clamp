@@ -3,12 +3,15 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 runtime_lock="$repo_root/.agents/clamp-runtime.lock"
+runtime_metadata="$repo_root/.agents/runtime_metadata.py"
 cli_install_root="$HOME/.local/share/clamp/kb"
 cli_active="$HOME/.local/bin/kb"
 runtime_version=''
 cli_revision=''
 runtime_url=''
 runtime_sha256=''
+runtime_archive_root=''
+runtime_archive_size=67108864
 cli_install_dir=''
 runtime_migrations=''
 postgres_major=15
@@ -36,22 +39,41 @@ run_stage() {
 }
 
 load_runtime_lock() {
-  local lines
+  local fields manifest
 
-  [[ -f "$runtime_lock" && ! -L "$runtime_lock" ]]
-  mapfile -t lines < "$runtime_lock"
-  if (( ${#lines[@]} != 4 )) \
-     || [[ ! "${lines[0]}" =~ ^version=([0-9A-Za-z.-]{1,64})$ ]] \
-     || [[ ! "${lines[1]}" =~ ^revision=([0-9a-f]{40})$ ]] \
-     || [[ ! "${lines[2]}" =~ ^url=(https://[^@[:space:]]{1,2039})$ ]] \
-     || [[ ! "${lines[3]}" =~ ^sha256=([0-9a-f]{64})$ ]]; then
+  [[ -f "$runtime_metadata" && ! -L "$runtime_metadata" ]]
+  if ! mapfile -t fields < <(python3 "$runtime_metadata" lock "$runtime_lock" linux-x86_64) \
+     || (( ${#fields[@]} != 5 )); then
     printf '[clamp setup] invalid runtime lock in %s\n' "$runtime_lock" >&2
     return 1
   fi
-  runtime_version="${lines[0]#version=}"
-  cli_revision="${lines[1]#revision=}"
-  runtime_url="${lines[2]#url=}"
-  runtime_sha256="${lines[3]#sha256=}"
+  runtime_version="${fields[1]}"
+  cli_revision="${fields[2]}"
+  if [[ "${fields[0]}" == v1 ]]; then
+    runtime_url="${fields[3]}"
+    runtime_sha256="${fields[4]}"
+    runtime_archive_root="clamp-${runtime_version}-linux-x86_64"
+  elif [[ "${fields[0]}" == v2 ]]; then
+    manifest="$(mktemp)"
+    trap 'rm -f -- "${manifest:-}"' RETURN
+    curl --fail --silent --show-error --location --proto '=https' \
+      --proto-redir '=https' --tlsv1.2 --retry 3 --connect-timeout 10 \
+      --max-time 30 --max-filesize 1048576 "${fields[3]}" --output "$manifest"
+    if ! mapfile -t fields < <(python3 "$runtime_metadata" manifest "$manifest" \
+         "$runtime_version" "$cli_revision" linux-x86_64 "${fields[4]}") \
+       || (( ${#fields[@]} != 4 )); then
+      printf '[clamp setup] invalid runtime manifest\n' >&2
+      return 1
+    fi
+    runtime_url="${fields[0]}"
+    runtime_sha256="${fields[1]}"
+    runtime_archive_root="${fields[2]}"
+    runtime_archive_size="${fields[3]}"
+    rm -f -- "$manifest"
+    trap - RETURN
+  else
+    return 1
+  fi
   cli_install_dir="$cli_install_root/$cli_revision"
   runtime_migrations="$cli_install_dir/share/clamp/migrations"
 }
@@ -103,13 +125,12 @@ install_runtime() {
     curl --fail --silent --show-error --location --proto '=https' \
       --proto-redir '=https' \
       --tlsv1.2 --retry 3 --connect-timeout 10 --max-time 120 \
-      --max-filesize 67108864 "$runtime_url" --output "$archive"
+      --max-filesize "$runtime_archive_size" "$runtime_url" --output "$archive"
     printf '%s  %s\n' "$runtime_sha256" "$archive" | sha256sum --check --status
 
-    python3 - "$archive" "$runtime_version" "$cli_revision" <<'PY'
+    python3 - "$archive" "$runtime_version" "$cli_revision" "$runtime_archive_root" <<'PY'
 import re, sys, tarfile
-archive, version, revision = sys.argv[1:]
-root = f"clamp-{version}-linux-x86_64"
+archive, version, revision, root = sys.argv[1:]
 prefix = root + "/"
 required = {
     prefix + "bin/kb", prefix + "REVISION", prefix + "VERSION",
@@ -117,11 +138,13 @@ required = {
     prefix + "share/clamp/migrations/0001_enable_vector.sql",
     prefix + "share/clamp/migrations/0002_application_schema.sql",
     prefix + "share/clamp/templates/setup", prefix + "share/clamp/templates/resume",
+    prefix + "share/clamp/templates/runtime_metadata.py",
     prefix + "share/clamp/templates/skill.md", prefix + "share/clamp/templates/AGENTS.md",
     prefix + "share/clamp/templates/README.md", prefix + "share/clamp/templates/gitignore",
 }
 with tarfile.open(archive, "r:gz") as value:
     files = set()
+    entries = set()
     total = 0
     for member in value.getmembers():
         if member.issym() or member.islnk() or not (member.isdir() or member.isfile()):
@@ -132,6 +155,9 @@ with tarfile.open(archive, "r:gz") as value:
                 or any(not re.fullmatch(r"[A-Za-z0-9._:+-]+", part)
                        for part in parts)):
             raise SystemExit("unsafe runtime archive path")
+        if name in entries:
+            raise SystemExit("duplicate runtime archive entry")
+        entries.add(name)
         if member.isfile():
             relative = name[len(prefix):]
             allowed_library = relative.startswith("lib/") and relative.count("/") == 1
@@ -146,7 +172,7 @@ with tarfile.open(archive, "r:gz") as value:
 PY
     tar --extract --gzip --file "$archive" --directory "$temp_dir" \
       --no-same-owner --no-same-permissions
-    payload="$temp_dir/clamp-${runtime_version}-linux-x86_64"
+    payload="$temp_dir/$runtime_archive_root"
     [[ "$(cat "$payload/REVISION")" == "$cli_revision" ]]
     [[ "$(cat "$payload/VERSION")" == "$runtime_version" ]]
     "$payload/bin/kb" --version >/dev/null

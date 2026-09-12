@@ -6,7 +6,7 @@
 (test
  (name upgrade_test)
  (modules upgrade_test)
- (libraries clamp alcotest digestif unix))
+ (libraries clamp alcotest digestif str unix))
 
 (test
  (name phase1_test)
@@ -89,7 +89,8 @@
 (test
  (name initializer_test)
  (modules initializer_test)
- (deps (source_tree ../../runtime/templates))
+ (deps
+  (source_tree ../../runtime/templates))
  (libraries clamp alcotest unix))
 
 (test
@@ -99,3 +100,20 @@
   ../../PRD.md
   (source_tree ../fixtures/v0_2_phase1))
  (libraries clamp alcotest digestif str yojson))
+
+(rule
+ (alias runtest)
+ (deps
+  ../../bin/kb.exe
+  ../../release/manifest
+  (source_tree ../../db/migrations)
+  (source_tree ../../runtime/templates)
+  runtime_metadata_test.py)
+ (action
+  (setenv
+   CLAMP_TEST_KB
+   %{dep:../../bin/kb.exe}
+   (setenv
+    DUNE_SOURCEROOT
+    %{workspace_root}
+    (run python3 %{dep:runtime_metadata_test.py})))))

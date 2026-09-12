@@ -618,7 +618,8 @@ let scaffold_fixtures () =
   unique "fresh scaffold paths" required;
   Alcotest.(check (list string)) "exact future scaffold"
     [ ".agents/clamp-runtime.lock"; ".agents/clamp-scaffold.json"; ".agents/kb";
-      ".agents/resume"; ".agents/setup"; ".agents/setup-local";
+      ".agents/resume"; ".agents/runtime_metadata.py"; ".agents/setup";
+      ".agents/setup-local";
       ".agents/skills/managing-clamp-knowledge/SKILL.md"; ".gitignore";
       "AGENTS.md"; "README.md"; "TODO.md"; "clamp.yaml" ]
     required;

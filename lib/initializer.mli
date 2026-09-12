@@ -17,6 +17,17 @@ val create :
   unit ->
   (created, error) Stdlib.result
 
+val create_v2 :
+  target:string ->
+  source_repository:string ->
+  runtime_version:string ->
+  runtime_revision:string ->
+  manifest_url:string ->
+  manifest_sha256:string ->
+  ?runtime_root:string ->
+  unit ->
+  (created, error) Stdlib.result
+
 val preflight :
   target:string ->
   source_repository:string ->

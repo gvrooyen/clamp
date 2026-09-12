@@ -53,6 +53,7 @@
       ".agents/clamp-scaffold.json",
       ".agents/kb",
       ".agents/resume",
+      ".agents/runtime_metadata.py",
       ".agents/setup",
       ".agents/setup-local",
       ".agents/skills/managing-clamp-knowledge/SKILL.md",
