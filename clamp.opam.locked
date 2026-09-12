@@ -27,7 +27,7 @@ depends: [
   "bos" {= "0.3.0"}
   "cmarkit" {= "0.4.0"}
   "cmdliner" {= "2.1.1"}
-  "compiler-cloning" {= "enabled"}
+  "compiler-cloning" {= "enabled" | = "disabled"}
   "conf-libcurl" {= "2"}
   "conf-pkg-config" {= "5"}
   "conf-postgresql" {= "2"}

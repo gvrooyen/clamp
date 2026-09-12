@@ -21,6 +21,9 @@ let with_bundle action =
   let root = Filename.temp_file "clamp-phase2-" "" in
   Sys.remove root;
   Unix.mkdir root 0o700;
+  (* Darwin inherits /tmp's wheel group; an unprivileged non-member chmod
+     silently strips setgid. Give permission fixtures a group we can set. *)
+  Unix.chown root (-1) (Unix.getegid ());
   Unix.mkdir (Filename.concat root "knowledge") 0o700;
   write (Filename.concat root "clamp.yaml") config;
   Fun.protect ~finally:(fun () -> remove root) (fun () -> action root)
@@ -1343,6 +1346,8 @@ let read_only_and_task_limit () =
               (task ~title:(Printf.sprintf "Low FD task %03d" index) ());
             id)
       in
+      Unix.mkfifo (Filename.concat tasks "non-markdown-fifo") 0o600;
+      ignore (get_ok (Clamp.Local.list_tasks root));
       ignore (get_ok (Clamp.Local.todo root));
       let executable =
         Filename.concat (Filename.dirname Sys.executable_name) "../../bin/kb.exe"
@@ -1361,10 +1366,10 @@ let read_only_and_task_limit () =
         (Sys.command ("bash -c " ^ Filename.quote script));
       Alcotest.(check bool) "low-FD transition returned stable success" true
         (String.contains (read output) 't');
-      let baseline = Array.length (Sys.readdir "/proc/self/fd") in
+      let baseline = Clamp.Secure_fs.descriptor_count () in
       let peak = ref baseline in
       let observe () =
-        peak := max !peak (Array.length (Sys.readdir "/proc/self/fd"))
+        peak := max !peak (Clamp.Secure_fs.descriptor_count ())
       in
       ignore
         (get_ok
@@ -1383,7 +1388,7 @@ let read_only_and_task_limit () =
       Alcotest.(check bool) "task descriptor usage is bounded independently of count"
         true (!peak <= baseline + 32);
       Alcotest.(check bool) "bounded task reads leak no descriptors" true
-        (Array.length (Sys.readdir "/proc/self/fd") <= baseline + 2));
+        (Clamp.Secure_fs.descriptor_count () <= baseline + 2));
   let assert_no_markdown_limit label root =
     let task_result = Clamp.Local.list_tasks root in
     Alcotest.(check bool) (label ^ " task list has no file-limit error") true
@@ -4741,7 +4746,7 @@ let completion_witness_races () =
            (Clamp.Local.add_task ~repo:root
               ~contents:(task ~title:"Injected bounded read" ())
               ~claim:"explicit" ~confirmed:false));
-      let before = Array.length (Sys.readdir "/proc/self/fd") in
+      let before = Clamp.Secure_fs.descriptor_count () in
       let fired = ref false in
       let result =
         Clamp.Local.For_test.with_task_input_capture_hook
@@ -4757,7 +4762,7 @@ let completion_witness_races () =
       Alcotest.(check bool) "bounded revalidation failure hook fired" true !fired;
       check_body_free_uncertain "bounded revalidation failure" result;
       Alcotest.(check bool) "partial bounded capture leaks no descriptors" true
-        (Array.length (Sys.readdir "/proc/self/fd") <= before + 2));
+        (Clamp.Secure_fs.descriptor_count () <= before + 2));
   with_bundle (fun root ->
       ignore
         (get_ok
@@ -5187,13 +5192,17 @@ let completion_witness_races () =
               ~contents:(fact ()) ~claim:"explicit" ~confirmed:false
               ~allow_unknown:false ~create:true));
       let foreign = Filename.concat root "knowledge/Facts" in
-      before_install_race "case-fold sibling membership"
+      (* Case-insensitive APFS already resolves Facts to facts. Inject a
+         distinct sibling there to exercise the same membership witness. *)
+      let foreign = if Sys.file_exists foreign then
+          Filename.concat root "knowledge/other" else foreign in
+      before_install_race "sibling membership"
         (fun () -> Unix.mkdir foreign 0o700)
         (fun () ->
           Clamp.Local.mutate ~repo:root ~id:"facts/case-race"
             ~contents:(fact ()) ~claim:"explicit" ~confirmed:false
             ~allow_unknown:false ~create:true);
-      Alcotest.(check bool) "foreign case-fold sibling survives" true
+      Alcotest.(check bool) "foreign sibling survives" true
         (Sys.file_exists foreign));
   with_bundle (fun root ->
       ignore
@@ -5643,7 +5652,7 @@ let private_transaction_cleanup () =
         (Array.length
            (Sys.readdir (Filename.concat detached "transactions"))));
   with_bundle (fun root ->
-      let before = Array.length (Sys.readdir "/proc/self/fd") in
+      let before = Clamp.Secure_fs.descriptor_count () in
       for index = 1 to 80 do
         let id = Printf.sprintf "facts/repeated-%d" index in
         ignore
@@ -5653,7 +5662,7 @@ let private_transaction_cleanup () =
                 ~create:true))
       done;
       Gc.full_major ();
-      let after = Array.length (Sys.readdir "/proc/self/fd") in
+      let after = Clamp.Secure_fs.descriptor_count () in
       Alcotest.(check bool) "repeated mutations do not leak descriptors" true
         (after <= before + 3);
       Alcotest.(check int) "successful mutations remove transactions" 0
@@ -5903,7 +5912,7 @@ let private_namespace_trust_and_lifetime () =
       Alcotest.(check bool) "live transaction mode hook fired" true !fired;
       Alcotest.(check bool) "unsafe transaction publishes no TODO" false
         (Sys.file_exists (Filename.concat root "TODO.md")));
-  let before = Array.length (Sys.readdir "/proc/self/fd") in
+  let before = Clamp.Secure_fs.descriptor_count () in
   for index = 1 to 30 do
     with_bundle (fun root ->
         Unix.mkdir (Filename.concat root ".clamp") 0o700;
@@ -5915,7 +5924,7 @@ let private_namespace_trust_and_lifetime () =
   done;
   Gc.full_major ();
   Alcotest.(check int) "unsafe transaction namespace does not leak descriptors" 0
-    (Array.length (Sys.readdir "/proc/self/fd") - before);
+    (Clamp.Secure_fs.descriptor_count () - before);
   for index = 1 to 30 do
     with_bundle (fun root ->
         let result =
@@ -5932,7 +5941,7 @@ let private_namespace_trust_and_lifetime () =
           "rollback_state_uncertain" (error_code result))
   done;
   Gc.full_major ();
-  let after = Array.length (Sys.readdir "/proc/self/fd") in
+  let after = Clamp.Secure_fs.descriptor_count () in
   Alcotest.(check int) "uncertain transactions do not leak descriptors" 0
     (after - before);
   with_bundle (fun root ->

@@ -63,6 +63,12 @@ module For_test : sig
     checksum:string ->
     (success, error) result
 
+  val install_prepared :
+    current_version:string ->
+    installation_root:string ->
+    release ->
+    (success, error) result
+
   val with_release_archive :
     version:string ->
     archive:string ->

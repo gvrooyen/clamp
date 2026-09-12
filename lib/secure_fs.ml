@@ -53,6 +53,18 @@ external descriptor_link_count : Unix.file_descr -> int = "clamp_descriptor_link
 external descriptor_owner_mode : Unix.file_descr -> int * int
   = "clamp_descriptor_owner_mode"
 external effective_uid : unit -> int = "clamp_effective_uid"
+external unsafe_fsync : Unix.file_descr -> unit = "clamp_fsync"
+external descriptor_count : unit -> int = "clamp_descriptor_count"
+type directory_removal
+external watch_directory_removal : Unix.file_descr -> directory_removal
+  = "clamp_watch_directory_removal"
+external directory_removal_observed : directory_removal -> bool
+  = "clamp_directory_removal_observed"
+external close_directory_removal : directory_removal -> unit
+  = "clamp_close_directory_removal"
+
+let fsync_error_hook = ref (fun (_ : Unix.file_descr) -> ())
+let fsync descriptor = !fsync_error_hook descriptor; unsafe_fsync descriptor
 
 let identity
     (_, device, inode, size, modified_seconds, modified_nanoseconds,
@@ -157,6 +169,213 @@ let iter_entries directory callback =
       in
       loop ())
 
+let same_entry left right =
+  left.device = right.device && left.inode = right.inode
+
+let same_identity left right = left = right
+
+let random_component () =
+  let bytes = Bytes.create 16 in
+  let source = Unix.openfile "/dev/urandom" [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close source) (fun () ->
+      let rec fill offset =
+        if offset < Bytes.length bytes then
+          match Unix.read source bytes offset (Bytes.length bytes - offset) with
+          | 0 -> raise End_of_file
+          | count -> fill (offset + count)
+          | exception Unix.Unix_error (Unix.EINTR, _, _) -> fill offset
+      in
+      fill 0);
+  let result = Buffer.create 46 in
+  Buffer.add_string result ".clamp-remove-";
+  Bytes.iter
+    (fun byte ->
+      Buffer.add_string result (Printf.sprintf "%02x" (Char.code byte)))
+    bytes;
+  Buffer.contents result
+
+let entry_absent parent name =
+  try ignore (inspect parent name); false
+  with Unix.Unix_error (Unix.ENOENT, _, _) -> true
+
+let entry_matches parent name expected_kind expected_identity descriptor =
+  try
+    let kind, identity = inspect parent name in
+    kind = expected_kind && same_entry identity expected_identity
+    && same_entry (descriptor_identity descriptor) expected_identity
+  with _ -> false
+
+let rec remove_tree_at ~validate parent name retained expected_identity =
+  let kind, observed = inspect parent name in
+  if not (same_entry observed expected_identity) then
+    raise Rename_validation_failed;
+  if not (validate ())
+     || not (entry_matches parent name kind expected_identity retained)
+  then raise Rename_validation_failed;
+  (match kind with
+  | Directory ->
+      chmod_descriptor retained 0o700
+  | _ -> ());
+  let quarantine = random_component () in
+  rename_noreplace_checked parent name parent quarantine
+    ~validate:(fun () ->
+      validate () && entry_matches parent name kind expected_identity retained
+      && entry_absent parent quarantine);
+  if not
+       (validate () && entry_absent parent name
+        && entry_matches parent quarantine kind expected_identity retained)
+  then raise Rename_validation_failed;
+  match kind with
+  | Directory ->
+      let directory = open_directory_at parent quarantine in
+      Fun.protect ~finally:(fun () -> Unix.close directory) (fun () ->
+          if not (same_entry expected_identity (descriptor_identity directory)) then
+            raise Rename_validation_failed;
+          fsync directory;
+          if not
+               (validate () && entry_absent parent name
+                && entry_matches parent quarantine Directory expected_identity
+                     retained)
+          then raise Rename_validation_failed;
+          let entries = ref [] in
+          iter_entries directory (fun child -> entries := child :: !entries);
+          let descendant_guard () =
+            validate () && entry_absent parent name
+            && entry_matches parent quarantine Directory expected_identity retained
+          in
+          List.sort String.compare !entries
+          |> List.iter (fun child ->
+                 let _, identity = inspect directory child in
+                 let descriptor = open_path_at directory child in
+                 Fun.protect ~finally:(fun () -> Unix.close descriptor) (fun () ->
+                     remove_tree_at ~validate:descendant_guard directory child
+                       descriptor identity));
+          if not
+               (validate () && entry_absent parent name
+                && entry_matches parent quarantine Directory expected_identity
+                     retained)
+          then raise Rename_validation_failed;
+          let watch = watch_directory_removal retained in
+          Fun.protect ~finally:(fun () -> close_directory_removal watch) (fun () ->
+              rmdir_at parent quarantine;
+              fsync parent;
+              if not
+                   (validate () && entry_absent parent name
+                    && entry_absent parent quarantine
+                    && directory_removal_observed watch)
+              then raise Rename_validation_failed))
+  | Regular | Symlink | Other ->
+      let links = descriptor_link_count retained in
+      unlink_at parent quarantine;
+      fsync parent;
+      if not
+           (validate () && entry_absent parent name
+            && entry_absent parent quarantine
+            && descriptor_link_count retained = max 0 (links - 1))
+      then raise Rename_validation_failed
+
+type tree_snapshot = {
+  tree_identity : identity;
+  tree_entries : (string * kind * identity * tree_snapshot option) list;
+}
+
+let sync_tree_error_hook = ref (fun () -> ())
+
+let sync_tree path =
+  !sync_tree_error_hook ();
+  let close_noerr descriptor =
+    try Unix.close descriptor with Unix.Unix_error _ -> ()
+  in
+  let rec tree_matches_directory directory snapshot =
+    let entries = ref [] in
+    iter_entries directory (fun name -> entries := name :: !entries);
+    let names = List.sort String.compare !entries in
+    List.map (fun (name, _, _, _) -> name) snapshot.tree_entries = names
+    && same_entry snapshot.tree_identity (descriptor_identity directory)
+    && List.for_all
+         (fun (name, expected_kind, expected_identity, child) ->
+           try
+             let kind, identity = inspect directory name in
+             if kind <> expected_kind || not (same_identity identity expected_identity)
+             then false
+             else
+               match child with
+               | None -> true
+               | Some child ->
+                   let descriptor = open_directory_at directory name in
+                   Fun.protect ~finally:(fun () -> close_noerr descriptor) (fun () ->
+                       tree_matches_directory descriptor child)
+           with _ -> false)
+         snapshot.tree_entries
+  and sync_directory directory =
+    let root_identity = descriptor_identity directory in
+    let entries = ref [] in
+    iter_entries directory (fun name -> entries := name :: !entries);
+    let synchronized =
+      List.sort String.compare !entries
+      |> List.map (fun name ->
+           let kind, identity = inspect directory name in
+           match kind with
+           | Regular ->
+               let descriptor = open_file_at directory name in
+               Fun.protect ~finally:(fun () -> close_noerr descriptor) (fun () ->
+                   if not (same_identity identity (descriptor_identity descriptor)) then
+                     raise Rename_validation_failed;
+                   fsync descriptor;
+                   let observed_kind, observed = inspect directory name in
+                   if observed_kind <> Regular || not (same_identity identity observed) then
+                     raise Rename_validation_failed);
+               (name, kind, identity, None)
+           | Directory ->
+               let descriptor = open_directory_at directory name in
+               let child =
+                 Fun.protect ~finally:(fun () -> close_noerr descriptor) (fun () ->
+                     if not (same_identity identity (descriptor_identity descriptor)) then
+                       raise Rename_validation_failed;
+                     let child = sync_directory descriptor in
+                     let observed_kind, observed = inspect directory name in
+                     if observed_kind <> Directory || not (same_identity identity observed) then
+                       raise Rename_validation_failed;
+                     child)
+               in
+               (name, kind, identity, Some child)
+           | Symlink | Other -> raise Rename_validation_failed);
+    in
+    let snapshot = { tree_identity = root_identity; tree_entries = synchronized } in
+    fsync directory;
+    if not (tree_matches_directory directory snapshot) then
+      raise Rename_validation_failed;
+    snapshot
+  in
+  let root = open_directory path in
+  Fun.protect ~finally:(fun () -> close_noerr root) (fun () -> sync_directory root)
+
+let tree_matches descriptor snapshot =
+  let close_noerr descriptor =
+    try Unix.close descriptor with Unix.Unix_error _ -> ()
+  in
+  let rec matches directory snapshot =
+    let entries = ref [] in
+    iter_entries directory (fun name -> entries := name :: !entries);
+    List.map (fun (name, _, _, _) -> name) snapshot.tree_entries
+    = List.sort String.compare !entries
+    && same_entry snapshot.tree_identity (descriptor_identity directory)
+    && List.for_all
+         (fun (name, expected_kind, expected_identity, child) ->
+           try
+             let kind, identity = inspect directory name in
+             kind = expected_kind && same_identity identity expected_identity
+             && match child with
+                | None -> true
+                | Some child ->
+                    let descriptor = open_directory_at directory name in
+                    Fun.protect ~finally:(fun () -> close_noerr descriptor) (fun () ->
+                        matches descriptor child)
+           with _ -> false)
+         snapshot.tree_entries
+  in
+  try matches descriptor snapshot with _ -> false
+
 let open_beneath root relative =
   let components = String.split_on_char '/' relative in
   if
@@ -203,4 +422,14 @@ module For_test = struct
     let previous = !flock_error_hook in
     Fun.protect ~finally:(fun () -> flock_error_hook := previous)
       (fun () -> flock_error_hook := hook; action ())
+
+  let with_fsync_error_hook hook action =
+    let previous = !fsync_error_hook in
+    Fun.protect ~finally:(fun () -> fsync_error_hook := previous)
+      (fun () -> fsync_error_hook := hook; action ())
+
+  let with_sync_tree_error_hook hook action =
+    let previous = !sync_tree_error_hook in
+    Fun.protect ~finally:(fun () -> sync_tree_error_hook := previous)
+      (fun () -> sync_tree_error_hook := hook; action ())
 end

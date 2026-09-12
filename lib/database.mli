@@ -125,6 +125,9 @@ val access_stats_rows : Postgresql.result -> (access_stats_row list, error) resu
 val index_state_row : Postgresql.result -> (index_state_row option, error) result
 
 module For_tests : sig
+  val with_local_target : local_target -> (unit -> 'a) -> 'a
+  (** Scoped integration-only private Unix socket target. No environment or
+      CLI override exists; runtime local discovery remains Debian-only. *)
   type ledger_constraint_row
   val ledger_constraint_row :
     constraint_type:string -> name:string -> definition:string -> key:string ->

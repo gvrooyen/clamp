@@ -3,4 +3,8 @@
  (public_name kb)
  (libraries clamp cmdliner)
  (link_flags
-  (:standard -cclib -Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib)))
+  (:standard (:include linker_flags.sexp))))
+
+(rule
+ (target linker_flags.sexp)
+ (action (run sh %{dep:linker-flags} %{system})))

@@ -13,7 +13,21 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/file.h>
+#ifdef __APPLE__
+#include <sys/mount.h>
+#include <sys/event.h>
+#define st_mtim st_mtimespec
+#define st_ctim st_ctimespec
+/* O_SYMLINK opens the link inode itself, including dangling links. O_EVTONLY
+   avoids data access; O_NONBLOCK prevents FIFO handshakes. Darwin still checks
+   access permissions, so inaccessible foreign entries fail closed. */
+#define CLAMP_PATH_FLAGS (O_EVTONLY | O_SYMLINK | O_NONBLOCK | O_CLOEXEC)
+#define RENAME_NOREPLACE RENAME_EXCL
+#define RENAME_EXCHANGE RENAME_SWAP
+#else
 #include <sys/syscall.h>
+#define CLAMP_PATH_FLAGS (O_PATH | O_CLOEXEC | O_NOFOLLOW)
+#endif
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -123,10 +137,24 @@ CAMLprim value clamp_read_trusted_regular_file(value path, value maximum)
 #define RENAME_EXCHANGE (1 << 1)
 #endif
 
+static int qualified_directory(int fd)
+{
+#ifdef __APPLE__
+  struct statfs filesystem;
+  int saved_errno = 0;
+  if (fstatfs(fd, &filesystem) == -1) saved_errno = errno;
+  else if (strcmp(filesystem.f_fstypename, "apfs") != 0 ||
+           !(filesystem.f_flags & MNT_LOCAL)) saved_errno = EOPNOTSUPP;
+  if (saved_errno) { close(fd); errno = saved_errno; return -1; }
+#endif
+  return fd;
+}
+
 CAMLprim value clamp_open_directory(value path)
 {
   CAMLparam1(path);
   int fd = open(String_val(path), O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW);
+  if (fd >= 0) fd = qualified_directory(fd);
   if (fd == -1) uerror("open", path);
   CAMLreturn(Val_int(fd));
 }
@@ -136,6 +164,7 @@ CAMLprim value clamp_open_directory_at(value directory, value name)
   CAMLparam2(directory, name);
   int fd = openat(Int_val(directory), String_val(name),
                   O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW);
+  if (fd >= 0) fd = qualified_directory(fd);
   if (fd == -1) uerror("openat", name);
   CAMLreturn(Val_int(fd));
 }
@@ -153,7 +182,7 @@ CAMLprim value clamp_open_path_at(value directory, value name)
 {
   CAMLparam2(directory, name);
   int fd = openat(Int_val(directory), String_val(name),
-                  O_PATH | O_CLOEXEC | O_NOFOLLOW);
+                  CLAMP_PATH_FLAGS);
   if (fd == -1) uerror("openat", name);
   CAMLreturn(Val_int(fd));
 }
@@ -197,19 +226,45 @@ CAMLprim value clamp_mkdir_at(value directory, value name)
 CAMLprim value clamp_mkdir_private_at(value directory, value name)
 {
   CAMLparam2(directory, name);
-  int reservation;
-  do {
-    reservation = open("/dev/null", O_RDONLY | O_CLOEXEC);
-  } while (reservation == -1 && errno == EINTR);
-  if (reservation == -1) uerror("open", Nothing);
+  /* Reserve every descriptor needed to witness the new entry before mutation.
+     Darwin later retains a duplicate and kqueue for deletion observation;
+     Linux observes zero links through the caller-retained descriptor. */
+#ifdef __APPLE__
+  const int slots = 3;
+#else
+  const int slots = 1;
+#endif
+  int reservations[3];
+  for (int i = 0; i < slots; i++) {
+    do { reservations[i] = open("/dev/null", O_RDONLY | O_CLOEXEC); }
+    while (reservations[i] == -1 && errno == EINTR);
+    if (reservations[i] == -1) {
+      int saved_errno = errno;
+      for (int j = 0; j < i; j++) close(reservations[j]);
+      errno = saved_errno;
+      uerror("open", Nothing);
+    }
+  }
 
   int created;
+#ifdef __APPLE__
+  /* Unlike O_PATH, Darwin entry opens require access permission. Create the
+     private directory with its final owner-only mode even under umask 0777.
+     This synchronous CLI is single-threaded; no runtime callback or blocking
+     section occurs while the process umask is temporarily changed. */
+  mode_t previous_mask = umask(0);
+#endif
   do {
     created = mkdirat(Int_val(directory), String_val(name), 0700);
   } while (created == -1 && errno == EINTR);
+#ifdef __APPLE__
+  int creation_errno = errno;
+  umask(previous_mask);
+  errno = creation_errno;
+#endif
   if (created == -1) {
     int saved_errno = errno;
-    close(reservation);
+    for (int i = 0; i < slots; i++) close(reservations[i]);
     errno = saved_errno;
     uerror("mkdirat", name);
   }
@@ -217,11 +272,11 @@ CAMLprim value clamp_mkdir_private_at(value directory, value name)
   /* Closing the reservation makes a descriptor slot available before the
      namespace mutation is opened.  Clamp is single-threaded, so no other
      runtime action can consume the slot between these two syscalls. */
-  close(reservation);
+  for (int i = 0; i < slots; i++) close(reservations[i]);
   int fd;
   do {
     fd = openat(Int_val(directory), String_val(name),
-                O_PATH | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW);
+                CLAMP_PATH_FLAGS | O_DIRECTORY | O_NOFOLLOW);
   } while (fd == -1 && errno == EINTR);
   if (fd == -1) caml_failwith("private directory open failed");
   CAMLreturn(Val_int(fd));
@@ -231,6 +286,9 @@ CAMLprim value clamp_chmod_descriptor(value descriptor, value mode)
 {
   CAMLparam2(descriptor, mode);
   if (fchmod(Int_val(descriptor), Int_val(mode)) == -1) {
+#ifdef __APPLE__
+    uerror("fchmod", Nothing);
+#else
     if (errno != EBADF) uerror("fchmod", Nothing);
     char path[64];
     int length = snprintf(path, sizeof(path), "/proc/self/fd/%d",
@@ -240,6 +298,7 @@ CAMLprim value clamp_chmod_descriptor(value descriptor, value mode)
       uerror("snprintf", Nothing);
     }
     if (chmod(path, Int_val(mode)) == -1) uerror("chmod", Nothing);
+#endif
   }
   CAMLreturn(Val_unit);
 }
@@ -248,7 +307,11 @@ static value clamp_renameat2(value olddir, value oldname, value newdir,
                              value newname, unsigned int flags)
 {
   CAMLparam4(olddir, oldname, newdir, newname);
-#ifdef SYS_renameat2
+#ifdef __APPLE__
+  if (renameatx_np(Int_val(olddir), String_val(oldname),
+                   Int_val(newdir), String_val(newname), flags) == -1)
+    uerror("renameatx_np", oldname);
+#elif defined(SYS_renameat2)
   if (syscall(SYS_renameat2, Int_val(olddir), String_val(oldname),
               Int_val(newdir), String_val(newname), flags) == -1)
     uerror("renameat2", oldname);
@@ -257,6 +320,56 @@ static value clamp_renameat2(value olddir, value oldname, value newdir,
   uerror("renameat2", oldname);
 #endif
   CAMLreturn(Val_unit);
+}
+
+CAMLprim value clamp_fsync(value descriptor)
+{
+  CAMLparam1(descriptor);
+  int fd = Int_val(descriptor);
+#ifdef __APPLE__
+  struct statfs filesystem;
+  if (fstatfs(fd, &filesystem) == -1) uerror("fstatfs", Nothing);
+  /* Only local APFS has been qualified. No reduced-durability fallback. */
+  if (strcmp(filesystem.f_fstypename, "apfs") != 0 ||
+      !(filesystem.f_flags & MNT_LOCAL)) {
+    errno = EOPNOTSUPP;
+    uerror("fsync", Nothing);
+  }
+#endif
+  while (fsync(fd) == -1) {
+    if (errno != EINTR) uerror("fsync", Nothing);
+  }
+#ifdef __APPLE__
+  while (fcntl(fd, F_FULLFSYNC) == -1) {
+    if (errno != EINTR) uerror("F_FULLFSYNC", Nothing);
+  }
+#endif
+  CAMLreturn(Val_unit);
+}
+
+CAMLprim value clamp_descriptor_count(value unit)
+{
+  CAMLparam1(unit);
+#ifdef __APPLE__
+  const char *path = "/dev/fd";
+#else
+  const char *path = "/proc/self/fd";
+#endif
+  DIR *directory = opendir(path);
+  if (directory == NULL) uerror("opendir", Nothing);
+  int count = 0;
+  struct dirent *entry;
+  errno = 0;
+  while ((entry = readdir(directory)) != NULL) {
+    if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, "..")) count++;
+  }
+  int saved_errno = errno;
+  closedir(directory);
+  if (saved_errno) {
+    errno = saved_errno;
+    uerror("readdir", Nothing);
+  }
+  CAMLreturn(Val_int(count));
 }
 
 CAMLprim value clamp_rename_noreplace(value olddir, value oldname,
@@ -294,6 +407,102 @@ CAMLprim value clamp_descriptor_link_count(value descriptor)
   if (fstat(Int_val(descriptor), &attributes) == -1)
     uerror("fstat", Nothing);
   CAMLreturn(Val_int(attributes.st_nlink));
+}
+
+struct removal_watch {
+  int fd;
+  int queue;
+  int deleted;
+  int owns_fd;
+  dev_t device;
+  ino_t inode;
+};
+
+static void close_removal_watch(value watch)
+{
+  struct removal_watch *w = Data_custom_val(watch);
+  if (w->queue >= 0) { close(w->queue); w->queue = -1; }
+  if (w->fd >= 0 && w->owns_fd) close(w->fd);
+  w->fd = -1;
+}
+
+static struct custom_operations removal_watch_operations = {
+  "clamp.directory-removal", close_removal_watch,
+  custom_compare_default, custom_hash_default,
+  custom_serialize_default, custom_deserialize_default,
+  custom_compare_ext_default, custom_fixed_length_default
+};
+
+CAMLprim value clamp_watch_directory_removal(value descriptor)
+{
+  CAMLparam1(descriptor);
+  CAMLlocal1(watch);
+  struct stat attributes;
+  if (fstat(Int_val(descriptor), &attributes) == -1) uerror("fstat", Nothing);
+  if (!S_ISDIR(attributes.st_mode)) caml_invalid_argument("directory witness required");
+  watch = caml_alloc_custom(&removal_watch_operations, sizeof(struct removal_watch), 0, 1);
+  struct removal_watch *w = Data_custom_val(watch);
+  w->fd = -1; w->queue = -1; w->deleted = 0; w->owns_fd = 0;
+  w->device = attributes.st_dev; w->inode = attributes.st_ino;
+#ifdef __APPLE__
+  w->fd = fcntl(Int_val(descriptor), F_DUPFD_CLOEXEC, 0);
+  if (w->fd == -1) uerror("fcntl", Nothing);
+  w->owns_fd = 1;
+  w->queue = kqueue();
+  if (w->queue == -1) goto failed;
+  if (fcntl(w->queue, F_SETFD, FD_CLOEXEC) == -1) goto failed;
+  struct kevent change;
+  EV_SET(&change, w->fd, EVFILT_VNODE, EV_ADD | EV_ENABLE | EV_CLEAR,
+         NOTE_DELETE | NOTE_REVOKE, 0, NULL);
+  if (kevent(w->queue, &change, 1, NULL, 0, NULL) == -1) goto failed;
+#else
+  /* Linux needs no pre-registered kernel event. The OCaml cleanup paths keep
+     this source descriptor open until the witness is closed. */
+  w->fd = Int_val(descriptor);
+#endif
+  CAMLreturn(watch);
+#ifdef __APPLE__
+failed: {
+    int saved_errno = errno;
+    close_removal_watch(watch);
+    errno = saved_errno;
+    uerror("directory-removal-watch", Nothing);
+  }
+#endif
+}
+
+CAMLprim value clamp_directory_removal_observed(value watch)
+{
+  CAMLparam1(watch);
+  struct removal_watch *w = Data_custom_val(watch);
+  if (w->fd < 0) caml_invalid_argument("closed directory removal witness");
+#ifdef __APPLE__
+  if (!w->deleted) {
+    struct kevent event;
+    struct timespec timeout = {0, 0};
+    int count;
+    do { count = kevent(w->queue, NULL, 0, &event, 1, &timeout); }
+    while (count == -1 && errno == EINTR);
+    if (count == -1) uerror("kevent", Nothing);
+    if (count == 1 && event.ident == (uintptr_t)w->fd &&
+        event.filter == EVFILT_VNODE && !(event.flags & EV_ERROR) &&
+        (event.fflags & NOTE_DELETE)) w->deleted = 1;
+  }
+  CAMLreturn(Val_bool(w->deleted));
+#else
+  struct stat attributes;
+  if (fstat(w->fd, &attributes) == -1) uerror("fstat", Nothing);
+  CAMLreturn(Val_bool(attributes.st_dev == w->device &&
+                      attributes.st_ino == w->inode &&
+                      attributes.st_nlink == 0));
+#endif
+}
+
+CAMLprim value clamp_close_directory_removal(value watch)
+{
+  CAMLparam1(watch);
+  close_removal_watch(watch);
+  CAMLreturn(Val_unit);
 }
 
 CAMLprim value clamp_descriptor_owner_mode(value descriptor)

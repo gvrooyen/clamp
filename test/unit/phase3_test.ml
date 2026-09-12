@@ -321,7 +321,7 @@ let resolver_syscall_containment () =
        "resolver.example");
   Alcotest.(check bool) "expired budget performs no fork" false !forked;
 
-  let fd_count () = Array.length (Sys.readdir "/proc/self/fd") in
+  let fd_count = Clamp.Secure_fs.descriptor_count in
   let before = fd_count () in
   let fork_failure =
     { default_resolver_system with
@@ -517,9 +517,9 @@ let resolver_syscall_containment () =
   let started = real_effects.now () in
   check_reason "expired resolver child" `Timeout
     (resolve_host_with ~system:slow_system ~effects:real_effects
-       ~deadline:(started +. 0.02) "resolver.example");
+       ~deadline:(started +. 0.2) "resolver.example");
   Alcotest.(check bool) "inherited resolver deadline is bounded" true
-    (real_effects.now () -. started < 0.2);
+    (real_effects.now () -. started < 0.4);
   Alcotest.(check int) "reserved cleanup sends one child kill" 1 !expired_kills;
   Alcotest.(check bool) "reserved cleanup waits for child" true (!expired_waits >= 2);
   (match !child with

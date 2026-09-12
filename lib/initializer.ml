@@ -83,19 +83,29 @@ let write_file ?(mode = 0o600) path contents =
       in
       write 0;
       Unix.fchmod descriptor mode;
-      Unix.fsync descriptor)
-
-let rec remove_owned path =
-  try
-    match (Unix.lstat path).st_kind with
-    | Unix.S_DIR ->
-        Sys.readdir path
-        |> Array.iter (fun name -> remove_owned (Filename.concat path name));
-        Unix.rmdir path
-    | _ -> Unix.unlink path
-  with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+      Secure_fs.fsync descriptor)
 
 let mkdir path = Unix.mkdir path 0o700
+
+let same_identity left right =
+  left.Secure_fs.device = right.Secure_fs.device
+  && left.inode = right.inode
+
+let retained_path_matches parent parent_descriptor parent_identity name
+    staged_descriptor staged_identity =
+  try
+    let observed_parent = Secure_fs.open_directory parent in
+    Fun.protect ~finally:(fun () -> Unix.close observed_parent) (fun () ->
+        let kind, observed_stage = Secure_fs.inspect parent_descriptor name in
+        kind = Secure_fs.Directory
+        && same_identity parent_identity
+             (Secure_fs.descriptor_identity parent_descriptor)
+        && same_identity parent_identity
+             (Secure_fs.descriptor_identity observed_parent)
+        && same_identity staged_identity observed_stage
+        && same_identity staged_identity
+             (Secure_fs.descriptor_identity staged_descriptor))
+  with _ -> false
 
 let mkdirs root components =
   ignore
@@ -230,12 +240,56 @@ let create_internal ~target ~source_repository ~runtime_version ~runtime_revisio
           in
           Result.bind parent_descriptor (fun parent_descriptor ->
               Fun.protect ~finally:(fun () -> Unix.close parent_descriptor) (fun () ->
+                  let parent_identity =
+                    Secure_fs.descriptor_identity parent_descriptor
+                  in
                   let temporary =
                     Printf.sprintf ".%s.clamp-init-%s" name (random_hex ())
                   in
                   let staged = Filename.concat parent temporary in
+                  let staged_descriptor = ref None in
+                  let installed = ref false in
+                  let close_staged () =
+                    Option.iter
+                      (fun descriptor ->
+                        try Unix.close descriptor with Unix.Unix_error _ -> ())
+                      !staged_descriptor;
+                    staged_descriptor := None
+                  in
+                  let cleanup_staged staged_identity =
+                    match !staged_descriptor with
+                    | None -> true
+                    | Some descriptor ->
+                        let guard () =
+                          try
+                            let observed_parent = Secure_fs.open_directory parent in
+                            Fun.protect
+                              ~finally:(fun () -> Unix.close observed_parent)
+                              (fun () ->
+                                same_identity parent_identity
+                                  (Secure_fs.descriptor_identity parent_descriptor)
+                                && same_identity parent_identity
+                                     (Secure_fs.descriptor_identity observed_parent)
+                                && (try
+                                      ignore (Secure_fs.inspect parent_descriptor name);
+                                      false
+                                    with Unix.Unix_error (Unix.ENOENT, _, _) -> true))
+                          with _ -> false
+                        in
+                        (try
+                           Secure_fs.remove_tree_at ~validate:guard parent_descriptor
+                             temporary descriptor staged_identity;
+                           guard ()
+                         with _ -> false)
+                  in
                   try
-                    mkdir staged;
+                    let descriptor =
+                      Secure_fs.mkdir_private_at parent_descriptor temporary
+                    in
+                    staged_descriptor := Some descriptor;
+                    let staged_identity =
+                      Secure_fs.descriptor_identity descriptor
+                    in
                     mkdirs staged [ ".agents"; "skills"; "managing-clamp-knowledge" ];
                     mkdirs staged [ "knowledge" ];
                     List.iter
@@ -270,20 +324,61 @@ let create_internal ~target ~source_repository ~runtime_version ~runtime_revisio
                     (match git_commit staged with
                     | Error issue -> raise (Failure issue.message)
                     | Ok () -> ());
-                    Secure_fs.rename_noreplace parent_descriptor temporary
-                      parent_descriptor name;
-                    Unix.fsync parent_descriptor;
+                    if not
+                         (retained_path_matches parent parent_descriptor
+                            parent_identity temporary descriptor staged_identity)
+                    then raise Secure_fs.Rename_validation_failed;
+                    let staged_snapshot = Secure_fs.sync_tree staged in
+                    Secure_fs.rename_noreplace_checked parent_descriptor temporary
+                      parent_descriptor name
+                      ~validate:(fun () ->
+                        retained_path_matches parent parent_descriptor
+                          parent_identity temporary descriptor staged_identity
+                        && Secure_fs.tree_matches descriptor staged_snapshot);
+                    installed := true;
+                    Secure_fs.fsync parent_descriptor;
+                    if not
+                         (retained_path_matches parent parent_descriptor
+                            parent_identity name descriptor staged_identity
+                          && Secure_fs.tree_matches descriptor staged_snapshot)
+                    then raise Secure_fs.Rename_validation_failed;
+                    close_staged ();
                     Ok { path = target; source_repository; runtime_revision }
                   with
                   | Unix.Unix_error (Unix.EEXIST, _, _) ->
-                      remove_owned staged;
-                      error "init_target_exists" "The initialization target already exists."
+                      let cleaned =
+                        match !staged_descriptor with
+                        | None -> true
+                        | Some descriptor ->
+                            cleanup_staged
+                              (Secure_fs.descriptor_identity descriptor)
+                      in
+                      close_staged ();
+                      if cleaned then
+                        error "init_target_exists"
+                          "The initialization target already exists."
+                      else
+                        error "init_state_uncertain"
+                          "The private repository staging state is uncertain."
                   | failure ->
-                      remove_owned staged;
-                      error "init_failed"
-                        (match failure with
-                        | Failure message -> message
-                        | _ -> "The private repository could not be initialized."))))
+                      let cleaned =
+                        if !installed then true
+                        else
+                          match !staged_descriptor with
+                          | None -> true
+                          | Some descriptor ->
+                              cleanup_staged
+                                (Secure_fs.descriptor_identity descriptor)
+                      in
+                      close_staged ();
+                      if !installed || not cleaned then
+                        error "init_state_uncertain"
+                          "The private repository was installed, but its durable state is uncertain."
+                      else
+                        error "init_failed"
+                          (match failure with
+                          | Failure message -> message
+                          | _ -> "The private repository could not be initialized."))))
 
 let create ~target ~source_repository ~runtime_version ~runtime_revision
     ~runtime_url ~runtime_sha256 ?runtime_root () =

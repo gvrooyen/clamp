@@ -84,12 +84,14 @@ frontmatter values while controlling provenance, verification, lifecycle, and
 timestamps. Task changes and the generated TODO view are written as one
 reported operation.
 
-The implementation uses Linux no-follow traversal, a lock on the open
-repository-root directory inode, fsynced temporary files, no-replace/exchange
-renames, private transaction directories, and post-write identity checks. It
-never falls back to an unsafe ordinary overwrite. A crash can still occur
-between the task and TODO renames; this is detectable `todo_drift`, repaired by
-`kb todo`.
+The implementation uses platform-specific no-follow traversal behind one
+`Secure_fs` boundary, a lock on the open repository-root directory inode,
+durably synchronized temporary files, no-replace/exchange renames, private
+transaction directories, and post-write identity checks. Linux uses `O_PATH`
+and `renameat2`; Darwin uses `O_EVTONLY`/`O_SYMLINK`, `renameatx_np`, and local
+APFS `fsync` plus `F_FULLFSYNC`. Neither target falls back to an unsafe ordinary
+overwrite. A crash can still occur between the task and TODO renames; this is
+detectable `todo_drift`, repaired by `kb todo`.
 
 The exact mutation and rollback invariants are normative in
 [PRD.md](./PRD.md).
@@ -155,9 +157,11 @@ Runtime-manifest parsing, target detection, local enrollment, and platform
 filesystem primitives must remain independently testable boundaries rather
 than shell overrides around Linux behavior.
 
-This boundary is contractual but not implemented in v0.1.4. The accepted
-target matrix and pending native evidence are recorded in
-[the Phase 1 qualification record](./docs/local-clone-phase1.md).
+The portable runtime metadata and native Linux/macOS runtime-package boundaries
+are implemented toward 0.2. The repository launcher, local setup, enrollment,
+and scaffold migration described above remain later-phase work. The target
+qualification record is in [Phase 1](./docs/local-clone-phase1.md), with native
+runtime evidence in [Phase 3](./docs/macos-phase3.md).
 
 ## Embeddings and synchronization
 

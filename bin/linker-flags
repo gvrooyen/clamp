@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+case "$1" in
+  macosx) printf '(-cclib -Wl,-headerpad_max_install_names,-rpath,@executable_path/../lib,-platform_version,macos,26.5.2,26.5.2)\n' > linker_flags.sexp ;;
+  linux) printf '(-cclib -Wl,--disable-new-dtags,-rpath,$ORIGIN/../lib)\n' > linker_flags.sexp ;;
+  *) echo 'Unsupported native linker target' >&2; exit 1 ;;
+esac

@@ -9,7 +9,10 @@ let command program arguments =
   Unix.close dev_null;
   match status with Unix.WEXITED 0 -> () | _ -> Alcotest.fail (program ^ " failed")
 
-let git repo arguments = command "git" ("-C" :: repo :: arguments)
+let git repo arguments =
+  command "git"
+    ([ "-c"; "commit.gpgsign=false"; "-c"; "core.hooksPath=/dev/null";
+       "-C"; repo ] @ arguments)
 
 let git_output repo arguments =
   let read_end, write_end = Unix.pipe () in
@@ -78,7 +81,7 @@ let commit_and_push author message =
 let quote_identifier value =
   "\"" ^ String.concat "\"\"" (String.split_on_char '\"' value) ^ "\""
 
-let target = lazy (match Clamp.Database.discover_local_target () with
+let target = lazy (match Disposable_database.discover () with
     | Ok target -> target
     | Error error -> Alcotest.fail error.message)
 
@@ -94,6 +97,7 @@ let sql (connection : Postgresql.connection) statement =
 
 let postgres database statement =
   let target = Lazy.force target in
+  if Disposable_database.administer target database statement then () else
   command "/usr/bin/sudo"
     [ "-u"; "postgres"; "/usr/bin/env"; "-i"; "HOME=/var/lib/postgresql";
       "USER=postgres"; "LOGNAME=postgres"; "PATH=/usr/bin:/bin";
@@ -203,7 +207,7 @@ let with_remote_login ?(configure_role = fun _ -> ()) env operation =
       in
       operation url)
 
-let capture_process ?(pooled = false) ~url arguments =
+let capture_process ?(timeout = 60.) ?(pooled = false) ~url arguments =
   let program =
     if Sys.file_exists "_build/default/bin/kb.exe" then "_build/default/bin/kb.exe"
     else "../../bin/kb.exe"
@@ -223,7 +227,7 @@ let capture_process ?(pooled = false) ~url arguments =
   let output = Buffer.create 4096 and errors = Buffer.create 4096 in
   let descriptors = ref [ (stdout_read, output); (stderr_read, errors) ] in
   let chunk = Bytes.create 8192 in
-  let deadline = Unix.gettimeofday () +. 60. in
+  let deadline = Unix.gettimeofday () +. timeout in
   while !descriptors <> [] do
     let remaining = deadline -. Unix.gettimeofday () in
     if remaining <= 0. then begin
@@ -731,8 +735,10 @@ let production_adapter_diagnostics () =
             failure.diagnostics |> List.map Clamp.Diagnostic.human
             |> String.concat "\n"
           in
+          (* Reading 1,001 Git blobs spawns many processes. This is an output
+             contract test, not a 60-second synchronization performance bound. *)
           let json_status, json_stdout, json_stderr =
-            capture_process ~url [ "sync"; "--repo"; env.clone; "--json" ]
+            capture_process ~timeout:240. ~url [ "sync"; "--repo"; env.clone; "--json" ]
           in
           (match json_status with
           | Unix.WEXITED 2 -> ()
@@ -745,7 +751,7 @@ let production_adapter_diagnostics () =
           Alcotest.(check string) "production CLI exact diagnostics" expected_json
             (json |> member "details" |> member "diagnostics" |> Yojson.Safe.to_string);
           let human_status, human_stdout, human_stderr =
-            capture_process ~url [ "sync"; "--repo"; env.clone ]
+            capture_process ~timeout:240. ~url [ "sync"; "--repo"; env.clone ]
           in
           (match human_status with
           | Unix.WEXITED 2 -> ()
@@ -814,8 +820,15 @@ let non_markdown_paths () =
         (database_snapshot env.connection);
       remove (Filename.concat env.author "knowledge/bad name");
       write (Filename.concat env.author "knowledge/Foo/readme.txt") "upper\n";
-      write (Filename.concat env.author "knowledge/foo/other.txt") "lower\n";
-      ignore (commit_and_push env.author "case collision non-Markdown path");
+      git env.author [ "add"; "-A" ];
+      let blob = git_output env.author
+          [ "hash-object"; "-w"; "knowledge/Foo/readme.txt" ] in
+      (* APFS aliases Foo/foo. Construct the hostile Git tree independently
+         of the worktree filesystem, retaining both directory spellings. *)
+      git env.author [ "update-index"; "--add"; "--cacheinfo";
+                       "100644"; blob; "knowledge/foo/other.txt" ];
+      git env.author [ "commit"; "--quiet"; "-m"; "case collision non-Markdown path" ];
+      git env.author [ "push"; "--quiet"; "origin"; "main" ];
       check_error "case collision non-Markdown" "path_duplicate" (run env calls);
       Alcotest.(check int) "case collision non-Markdown no embed" before_calls !calls;
       Alcotest.(check string) "case collision non-Markdown exact DB" before
@@ -1138,9 +1151,14 @@ let reserved_validation () =
       Alcotest.(check string) "nonportable zero database effects" before
         (database_snapshot env.connection);
       remove (Filename.concat env.author "knowledge/bad name");
-      write (Filename.concat env.author "knowledge/Index.md")
-        "# Index\n## Entries\n";
-      ignore (commit_and_push env.author "case-colliding reserved path");
+      (* Construct the hostile Git tree directly: case-insensitive APFS cannot
+         represent both index.md and Index.md as worktree entries. *)
+      git env.author [ "add"; "-A" ];
+      let blob = git_output env.author [ "rev-parse"; "HEAD:knowledge/index.md" ] in
+      git env.author [ "update-index"; "--add"; "--cacheinfo";
+                       "100644," ^ blob ^ ",knowledge/Index.md" ];
+      git env.author [ "commit"; "--quiet"; "-m"; "case-colliding reserved path" ];
+      git env.author [ "push"; "--quiet"; "origin"; "main" ];
       check_error "case-colliding reserved path" "path_duplicate" (run env calls);
       Alcotest.(check int) "case collision no embedding" before_calls !calls;
       Alcotest.(check string) "case collision zero database effects" before
@@ -1202,6 +1220,7 @@ let amp_authenticated_git () =
   with_watchdog "Amp authenticated Git" (fun () ->
     let root = Filename.temp_file "clamp-phase5-amp-auth-" "" in
     Sys.remove root; Unix.mkdir root 0o700;
+    let root = Unix.realpath root in
     Fun.protect ~finally:(fun () -> remove root) (fun () ->
       let home = Filename.concat root "home" in
       let runtime = Filename.concat home ".amp"
@@ -2630,9 +2649,9 @@ let process_group_cleanup () =
         all_pids := values @ !all_pids;
         values
       in
-      let ack_descriptors = Array.length (Sys.readdir "/proc/self/fd") in
+      let ack_descriptors = Clamp.Secure_fs.descriptor_count () in
       let ack_acquisition =
-        advanced ~program:"/bin/true" ~arguments:[| "/bin/true" |]
+        advanced ~program:"/usr/bin/true" ~arguments:[| "/usr/bin/true" |]
           ~maximum:128 ~timeout:1.
           ~before_pipe:(fun number ->
             if number = 4 then
@@ -2640,14 +2659,14 @@ let process_group_cleanup () =
       in
       check_error "ACK acquisition" "git_unavailable" ack_acquisition;
       Alcotest.(check int) "ACK acquisition descriptors cleaned" ack_descriptors
-        (Array.length (Sys.readdir "/proc/self/fd"));
+        (Clamp.Secure_fs.descriptor_count ());
       let start_helper = Filename.concat root "start-helper.py"
       and start_marker = Filename.concat root "helper-started" in
       write start_helper
         "import pathlib, sys\npathlib.Path(sys.argv[1]).write_text('started')\n";
       let handshake_pid = ref None and group_seen = ref false
       and acknowledged = ref false in
-      let handshake_descriptors = Array.length (Sys.readdir "/proc/self/fd") in
+      let handshake_descriptors = Clamp.Secure_fs.descriptor_count () in
       let handshake_timeout =
         advanced ~program:"/usr/bin/python3"
           ~arguments:[| "/usr/bin/python3"; start_helper; start_marker |]
@@ -2668,13 +2687,13 @@ let process_group_cleanup () =
       Alcotest.(check bool) "pre-ACK group removed" false
         (Option.exists process_group_exists !handshake_pid);
       Alcotest.(check int) "pre-ACK descriptors cleaned" handshake_descriptors
-        (Array.length (Sys.readdir "/proc/self/fd"));
+        (Clamp.Secure_fs.descriptor_count ());
       Option.iter (fun pid -> all_pids := pid :: !all_pids) !handshake_pid;
       let ack_failures =
         ref [ Unix.EINTR; Unix.EAGAIN; Unix.EWOULDBLOCK ]
       and ack_attempts = ref 0 in
       let ack_retry =
-        advanced ~program:"/bin/true" ~arguments:[| "/bin/true" |]
+        advanced ~program:"/usr/bin/true" ~arguments:[| "/usr/bin/true" |]
           ~maximum:128 ~timeout:1.
           ~before_ack_write:(fun () ->
             incr ack_attempts;
@@ -2689,9 +2708,9 @@ let process_group_cleanup () =
       | _ -> Alcotest.fail "ACK transient write retry failed");
       Alcotest.(check int) "ACK write retried" 4 !ack_attempts;
       let ack_close_pid = ref None and ack_callback = ref false in
-      let ack_close_descriptors = Array.length (Sys.readdir "/proc/self/fd") in
+      let ack_close_descriptors = Clamp.Secure_fs.descriptor_count () in
       let ack_close =
-        advanced ~program:"/bin/true" ~arguments:[| "/bin/true" |]
+        advanced ~program:"/usr/bin/true" ~arguments:[| "/usr/bin/true" |]
           ~maximum:128 ~timeout:1.
           ~after_fork:(fun pid -> ack_close_pid := Some pid)
           ~before_ack_close:(fun () ->
@@ -2703,9 +2722,9 @@ let process_group_cleanup () =
       Alcotest.(check bool) "ACK close leader reaped" true
         (Option.exists await_process_exit !ack_close_pid);
       Alcotest.(check int) "ACK close descriptors cleaned" ack_close_descriptors
-        (Array.length (Sys.readdir "/proc/self/fd"));
+        (Clamp.Secure_fs.descriptor_count ());
       Option.iter (fun pid -> all_pids := pid :: !all_pids) !ack_close_pid;
-      let eof_descriptors = Array.length (Sys.readdir "/proc/self/fd") in
+      let eof_descriptors = Clamp.Secure_fs.descriptor_count () in
       let barrier = Filename.concat root "eof-ready" in
       Unix.mkfifo barrier 0o600;
       let barrier_read =
@@ -2729,7 +2748,7 @@ let process_group_cleanup () =
       Alcotest.(check char) "EOF helper readiness marker" 'R' (Bytes.get marker 0);
       Unix.close barrier_read;
       Alcotest.(check int) "EOF barrier descriptors cleaned" eof_descriptors
-        (Array.length (Sys.readdir "/proc/self/fd"));
+        (Clamp.Secure_fs.descriptor_count ());
       record timeout_pids
       |> List.iter (fun pid ->
              Alcotest.(check bool) "EOF descendant reaped" true
@@ -2755,7 +2774,7 @@ let process_group_cleanup () =
                (await_process_exit pid));
       let delayed_callback = ref false in
       let delayed =
-        advanced ~program:"/bin/true" ~arguments:[| "/bin/true" |]
+        advanced ~program:"/usr/bin/true" ~arguments:[| "/usr/bin/true" |]
           ~maximum:128 ~timeout:0.05 ~child_setup_delay:0.2
           ~after_spawn:(fun _ -> delayed_callback := true) ()
       in
@@ -2784,7 +2803,7 @@ let process_group_cleanup () =
       let interrupted = ref true and wait_calls = ref 0 in
       let reaped = ref None in
       let eintr =
-        advanced ~program:"/bin/true" ~arguments:[| "/bin/true" |]
+        advanced ~program:"/usr/bin/true" ~arguments:[| "/usr/bin/true" |]
           ~maximum:128 ~timeout:1.
           ~after_spawn:(fun pid -> reaped := Some pid)
           ~before_waitpid:(fun () ->
@@ -2799,9 +2818,9 @@ let process_group_cleanup () =
       | _ -> Alcotest.fail "waitpid EINTR retry failed");
       Alcotest.(check bool) "waitpid retried" true (!wait_calls >= 2);
       Option.iter (fun pid -> all_pids := pid :: !all_pids) !reaped;
-      let descriptors_before = Array.length (Sys.readdir "/proc/self/fd") in
+      let descriptors_before = Clamp.Secure_fs.descriptor_count () in
       let pipe_failure =
-        advanced ~program:"/bin/true" ~arguments:[| "/bin/true" |]
+        advanced ~program:"/usr/bin/true" ~arguments:[| "/usr/bin/true" |]
           ~maximum:128 ~timeout:1.
           ~before_pipe:(fun number ->
             if number = 2 then
@@ -2809,7 +2828,7 @@ let process_group_cleanup () =
       in
       check_error "pipe acquisition" "git_unavailable" pipe_failure;
       Alcotest.(check int) "pipe descriptors cleaned" descriptors_before
-        (Array.length (Sys.readdir "/proc/self/fd"));
+        (Clamp.Secure_fs.descriptor_count ());
       let identity_pid = ref None in
       let identity =
         advanced ~program:"/usr/bin/python3"
@@ -2849,7 +2868,7 @@ let process_group_cleanup () =
                (await_process_exit pid));
       let nonzero_pid = ref None in
       let nonzero =
-        advanced ~program:"/bin/false" ~arguments:[| "/bin/false" |]
+        advanced ~program:"/usr/bin/false" ~arguments:[| "/usr/bin/false" |]
           ~maximum:128 ~timeout:1.
           ~after_spawn:(fun pid -> nonzero_pid := Some pid) ()
       in
@@ -2862,7 +2881,7 @@ let process_group_cleanup () =
           Alcotest.(check bool) "final process residue" true (await_process_exit pid))
         !all_pids))
 
-let () =
+let () = Disposable_database.run (fun () ->
   Alcotest.run "Phase 5 Git synchronization"
     [ ("sync", [ Alcotest.test_case "shallow deterministic convergence" `Quick core_convergence;
                  Alcotest.test_case "distinct pushurl uses fetch URL" `Quick
@@ -2901,4 +2920,4 @@ let () =
                  Alcotest.test_case "knowledge root kind" `Quick knowledge_root_validation;
                  Alcotest.test_case "HNSW selective candidate fill" `Quick
                    retrieval_hnsw_candidates;
-                 Alcotest.test_case "Git process-group cleanup" `Quick process_group_cleanup ]) ]
+                 Alcotest.test_case "Git process-group cleanup" `Quick process_group_cleanup ]) ])

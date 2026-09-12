@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""Native, deterministic package builder. No developer signing or notarization.
+
+Run after the pinned native build. Supply each bundled library's license with
+--library-license NAME=FILE. Refuse unknown/nonabsolute dependency sources.
+"""
+import argparse
+import gzip
+import hashlib
+import os
+from pathlib import Path
+import platform
+import re
+import shutil
+import subprocess
+import tarfile
+import tempfile
+
+
+def run(*args, **kwargs):
+    return subprocess.check_output([str(a) for a in args], text=True, **kwargs).strip()
+
+
+def dependencies(path):
+    return [line.strip().split(" (", 1)[0]
+            for line in run("/usr/bin/otool", "-L", path).splitlines()[1:]]
+
+
+def system(path):
+    if path.startswith("/"):
+        components = path.split("/")[1:]
+        if any(component in ("", ".", "..") for component in components):
+            raise RuntimeError("noncanonical absolute dependency")
+    return path.startswith("/usr/lib/") or path.startswith("/System/Library/Frameworks/")
+
+
+def check_target(path, executable=False):
+    if run("/usr/bin/lipo", "-archs", path) != "arm64":
+        raise RuntimeError("unexpected Mach-O architecture")
+    commands = run("/usr/bin/otool", "-l", path)
+    minimum = re.search(r"minos\s+([0-9.]+)", commands)
+    if minimum is None:
+        raise RuntimeError("missing Mach-O deployment floor")
+    version = tuple((list(map(int, minimum[1].split("."))) + [0, 0])[:3])
+    if version > (26, 5, 2) or (executable and version != (26, 5, 2)):
+        raise RuntimeError("Mach-O deployment floor is incompatible with 26.5.2")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--library-license", action="append", default=[], metavar="NAME=FILE")
+    args = parser.parse_args()
+    if platform.system() != "Darwin" or platform.machine() != "arm64":
+        parser.error("native macos-arm64 host required")
+    if tuple(map(int, platform.mac_ver()[0].split("."))) < (26, 5, 2):
+        parser.error("macOS 26.5.2 or newer required")
+    licenses = {}
+    for item in args.library_license:
+        name, path = item.split("=", 1)
+        if Path(name).name != name or name in licenses:
+            parser.error("invalid or duplicate library license name")
+        licenses[name] = Path(path).resolve(strict=True)
+    repo = Path(__file__).resolve().parent.parent
+    version = re.search(r"^\(version ([0-9.]+)\)$", (repo / "dune-project").read_text(), re.M)[1]
+    revision = run("/usr/bin/git", "-C", repo, "rev-parse", "HEAD")
+    epoch = int(run("/usr/bin/git", "-C", repo, "log", "-1", "--format=%ct"))
+    name = "clamp-" + version + "-macos-arm64"
+    staging = repo / "_build" / "release-macos"
+    stage = staging / name
+    if stage.exists():
+        shutil.rmtree(stage)
+    for directory in ["bin", "lib", "share/licenses", "share/clamp/migrations", "share/clamp/templates"]:
+        (stage / directory).mkdir(parents=True, exist_ok=True)
+    executable = stage / "bin/kb"
+    shutil.copyfile(repo / "_build/default/bin/kb.exe", executable)
+    executable.chmod(0o755)
+    check_target(executable, executable=True)
+    queue = [(executable, repo / "_build/default/bin/kb.exe")]
+    sources = {}
+    for packaged, source in queue:
+        for dependency in dependencies(source):
+            if system(dependency):
+                continue
+            if source.suffix == ".dylib" and dependency == run("/usr/bin/otool", "-D", source).splitlines()[-1]:
+                continue
+            if not dependency.startswith("/"):
+                raise RuntimeError("unresolved input dependency: " + dependency)
+            original = Path(dependency).resolve(strict=True)
+            library_name = Path(dependency).name
+            if library_name not in licenses:
+                raise RuntimeError("explicit license required for " + library_name)
+            if library_name in sources and sources[library_name] != original:
+                raise RuntimeError("colliding dependency basenames")
+            destination = stage / "lib" / library_name
+            if library_name not in sources:
+                sources[library_name] = original
+                shutil.copyfile(original, destination)
+                destination.chmod(0o755)
+                check_target(destination)
+                run("/usr/bin/install_name_tool", "-id", "@rpath/" + library_name, destination)
+                queue.append((destination, original))
+            relative = "@loader_path/" + ("../lib/" if packaged == executable else "") + library_name
+            run("/usr/bin/install_name_tool", "-change", dependency, relative, packaged)
+    for packaged, _ in queue:
+        for dependency in dependencies(packaged):
+            if system(dependency):
+                continue
+            if dependency == "@rpath/" + packaged.name and packaged != executable:
+                continue
+            if not dependency.startswith("@loader_path/"):
+                raise RuntimeError("nonrelocatable packaged dependency")
+            resolved = (packaged.parent / dependency[len("@loader_path/"):]).resolve(strict=True)
+            if resolved.parent != (stage / "lib").resolve():
+                raise RuntimeError("dependency escapes package")
+    for source in sorted((repo / "db/migrations").glob("*.sql")):
+        shutil.copyfile(source, stage / "share/clamp/migrations" / source.name)
+    for filename in ["setup", "resume", "skill.md", "AGENTS.md", "README.md", "gitignore", "runtime_metadata.py"]:
+        shutil.copyfile(repo / "runtime/templates" / filename, stage / "share/clamp/templates" / filename)
+    shutil.copyfile(repo / "LICENSE", stage / "LICENSE")
+    (stage / "VERSION").write_text(version + "\n")
+    (stage / "REVISION").write_text(revision + "\n")
+    notices = ["Clamp " + version + " macos-arm64 runtime libraries", ""]
+    for library_name in sorted(sources):
+        shutil.copyfile(licenses[library_name], stage / "share/licenses" / (library_name + ".txt"))
+        notices.append(library_name + "\tSHA256=" + hashlib.sha256(sources[library_name].read_bytes()).hexdigest())
+    notices.extend(["", "OCaml libraries: see clamp.opam.locked at source revision " + revision,
+                    "Apple system libraries are not redistributed."])
+    (stage / "THIRD_PARTY_NOTICES").write_text("\n".join(notices) + "\n")
+    (stage / "README.txt").write_text(
+        "Clamp " + version + " for Apple silicon, local APFS, macOS 26.5.2 or newer.\n"
+        "Run bin/kb. This is a native verification package, not a production release.\n"
+        "Developer signing, hardened runtime, notarization, and clean-machine\n"
+        "Gatekeeper acceptance remain explicit operator-controlled release gates.\n")
+    for path in sorted(stage.rglob("*")):
+        executable_file = path == executable or path.parent == stage / "lib" or path.name in ("setup", "resume")
+        path.chmod(0o755 if path.is_dir() or executable_file else 0o644)
+        os.utime(path, (epoch, epoch))
+    stage.chmod(0o755)
+    os.utime(stage, (epoch, epoch))
+    dist = repo / "dist"
+    dist.mkdir(exist_ok=True)
+    archive = dist / (name + ".tar.gz")
+    with archive.open("wb") as raw, gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0) as compressed:
+        with tarfile.open(fileobj=compressed, mode="w", format=tarfile.USTAR_FORMAT) as tar:
+            for path in [stage] + sorted(stage.rglob("*")):
+                info = tar.gettarinfo(str(path), str(path.relative_to(staging)))
+                info.uid = info.gid = 0
+                info.uname = info.gname = ""
+                info.mtime = epoch
+                if info.isfile():
+                    with path.open("rb") as contents:
+                        tar.addfile(info, contents)
+                else:
+                    tar.addfile(info)
+    with tempfile.TemporaryDirectory(prefix="clamp-package-") as extracted:
+        with tarfile.open(archive) as tar:
+            tar.extractall(extracted)
+        home = Path(extracted) / "home"
+        home.mkdir()
+        clean = {"HOME": str(home), "PATH": "/usr/bin:/bin", "LANG": "C"}
+        kb = Path(extracted) / name / "bin/kb"
+        if run(kb, "--version", env=clean) != version:
+            raise RuntimeError("extracted version mismatch")
+        help_text = run(kb, "--json", "--help", env=clean)
+        if "COMMANDS" not in help_text or "kb COMMAND" not in help_text:
+            raise RuntimeError("extracted help contract missing")
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    (dist / (archive.name + ".sha256")).write_text(digest + "  " + archive.name + "\n")
+    print(digest + "  " + archive.name)
+
+
+if __name__ == "__main__":
+    main()

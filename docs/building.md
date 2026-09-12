@@ -1,8 +1,8 @@
 # Building Clamp
 
-Clamp's only supported package is Linux x86-64 with glibc 2.36 or newer. macOS
-requires a platform port. For ordinary use, install the
-[published Linux release](./releases.md) instead of building from source.
+The published supported package remains Linux x86-64 with glibc 2.36 or newer.
+The native macOS arm64 backend and verification-package builder are development
+work toward the gated 0.2 target, not a supported production release.
 
 ## Linux source build
 
@@ -43,13 +43,13 @@ opam exec -- dune runtest test/unit
 ```
 
 The executable is `_build/default/bin/kb.exe`. `dune build @install` builds the
-install targets; it does not install them. The commands above run the unit
-suite. Full `dune runtest` requires the disposable PostgreSQL 15 and pgvector
-environment described in [Development and acceptance](./development.md).
+install targets; it does not install them. Full `dune runtest` requires the
+disposable database described in [Development and acceptance](./development.md).
 
-Use the repository's `.agents/setup` in an Amp development orb. It additionally
-prepares the exact local PostgreSQL and pgvector environment used by integration
-tests. It is not a general installer for other operating systems.
+Use `.agents/setup` in an Amp development orb. `.agents/setup`, `.agents/resume`,
+and `.agents/phase9-acceptance` remain Debian/Linux-only; they are not host
+installers. Their Linux-only acceptance test is excluded on macOS, not ported
+by weakening the environment or production-isolation checks.
 
 `release/build-in-container` runs as root inside a disposable Debian 12 x86-64
 container. It pins the Debian package snapshot, opam executable, opam
@@ -57,186 +57,118 @@ repository, compiler, and locked dependencies, then invokes `release/build`.
 It does not launch the container or select its image. A production build must
 run it inside a digest-pinned base image. Do not run it directly on your host.
 
-## What makes a target supported
+## Native macOS build and disposable integration
 
-A supported target needs tested filesystem and process behavior, native
-dependency linkage, packaging, installation, and upgrade support. Compilation
-alone is not sufficient.
+The candidate floor is **Apple silicon, macOS 26.5.2, local APFS**. Older OSes,
+other architectures and filesystems are not inferred to work. No Homebrew,
+profile changes, shared package installation, or production credentials are
+needed for an isolated source build. Xcode Command Line Tools must already be
+available. Use a private prefix, isolated `OPAMROOT`, and repo-local `_opam`.
 
-Do not replace a missing atomic primitive with a check followed by an ordinary
-rename. Clamp's write contract requires atomic no-replace and exchange
-operations and fails closed when they are unavailable.
+Required native inputs are opam 2.5.2 arm64, pkgconf/pkg-config, PostgreSQL
+15.19 with TLS-enabled libpq, pgvector 0.8.1, and the pinned OCaml dependencies.
+The Apple SDK's libcurl 8.7.1 is sufficient; expose a private `libcurl.pc`
+matching `/usr/bin/curl-config` if the SDK has no pkg-config metadata.
+OpenSSL 3.5.5 shared libraries can supply libpq's TLS implementation. Check
+downloaded release checksums against authoritative upstream release metadata.
+Do not override HTTPS verification or disable libpq TLS/channel binding.
 
-## macOS port
+Set `MACOSX_DEPLOYMENT_TARGET=26.5.2` for the compiler, dependencies, and every
+build invocation. The executable's linker flags also encode this floor.
+Upstream OCaml 5.5.0 requires `compiler-cloning.disabled` on macOS; the lock
+permits that upstream-selected build mode while retaining all library pins.
+Use `OPAMDEPEXT=false` to prevent system package-manager operations.
 
-### Current blockers
-
-The C stubs in `lib/secure_fs_stubs.c` use Linux-only open, stat, and rename
-interfaces:
-
-- `O_PATH`, used to retain descriptor-based identity without following links;
-- `renameat2` with `RENAME_NOREPLACE` and `RENAME_EXCHANGE`;
-- Linux `struct stat` fields `st_mtim` and `st_ctim`;
-- `/proc/self/fd`, used by the descriptor-bound mode-repair path;
-- Linux-specific syscall declarations and error handling.
-
-`bin/dune` also passes ELF-specific linker options unconditionally. The
-self-upgrader hard-codes `linux-x86_64` asset and archive-root names, discovers
-the executable through `/proc/self/exe`, invokes `/usr/bin/tar`, and parses GNU
-tar output. The release scripts use further GNU/Linux conventions including
-`ldd`, `readelf`, `$ORIGIN`, GNU `strip`, Debian package metadata, and GNU tar
-flags.
-
-The generated `.agents/setup` and `.agents/resume` scripts deliberately target
-Amp's Debian orb layout. They expect Linux x86-64 release names,
-`pg_conftool`, and Debian's PostgreSQL 15 paths. Several tests also inspect
-`/proc/self/fd` or exercise that local PostgreSQL layout.
-
-### 1. Add a Darwin filesystem backend
-
-Keep the OCaml `Secure_fs` contract unchanged and provide Darwin C stubs for
-the same operations. The port must preserve:
-
-- no-follow component traversal and retained directory or entry identity;
-- shared and exclusive advisory locks on the open repository root;
-- effective-UID ownership and mode checks;
-- descriptor-bound inspection and cleanup;
-- atomic no-replace and exchange renames with no unsafe fallback;
-- nanosecond modification and change timestamps;
-- durable file and parent-directory synchronization.
-
-File and directory synchronization also call `Unix.fsync` directly in the
-local mutation and upgrade code. Audit those calls as part of the port.
-Establish the required Darwin file-flush and parent-directory behavior,
-including unsupported-operation handling; do not assume that ordinary `fsync`
-or `F_FULLFSYNC` provides every required guarantee.
-
-Darwin APIs such as `renameatx_np` with `RENAME_EXCL` and `RENAME_SWAP` are
-possible implementation candidates, not assumed equivalents. Verify their
-same-filesystem behavior, error mapping, durability, and race semantics against
-the invariants in [PRD.md](../PRD.md) before using them. Likewise, choose a
-Darwin replacement for `O_PATH` only after proving that it witnesses regular
-files, directories, and symlinks without following or mutating them.
-
-Select Linux and Darwin stubs in `lib/dune` using Dune configuration or small
-platform-specific C translation units. Make the linker options in `bin/dune`
-target-specific at the same boundary. The Darwin build needs Mach-O-compatible
-linkage and package-relative library paths. Do not scatter operating-system
-checks through the OCaml mutation logic.
-
-### 2. Port executable and database handling
-
-Replace `/proc/self/exe` in the upgrader with a Darwin executable-path
-implementation, such as one based on `_NSGetExecutablePath`. Its result may
-contain symlinks, so preserve the existing package-layout and identity checks
-rather than treating the returned path as canonical.
-
-The local database bootstrap is a separate boundary. Either provide and test a
-macOS PostgreSQL/pgvector lifecycle implementation or clearly leave
-`--local-database`, `.agents/setup`, `.agents/resume`, and the Linux acceptance
-runner unsupported on macOS. Remote database commands still require native
-libpq plus the same TLS and channel-binding policy.
-
-### 3. Install the macOS toolchain
-
-After the platform code exists, build natively on each architecture. A typical
-Homebrew development environment starts with:
+With the private toolchain on PATH and private pkg-config paths:
 
 ```bash
-xcode-select --install
-brew install opam pkg-config libpq curl
-
-export PATH="$(brew --prefix libpq)/bin:$PATH"
-export PKG_CONFIG_PATH="$(brew --prefix libpq)/lib/pkgconfig"
-export PKG_CONFIG_PATH="$PKG_CONFIG_PATH:$(brew --prefix curl)/lib/pkgconfig"
-
-opam init --bare --no-setup --yes
+opam init --bare --no-setup --disable-sandboxing --yes
 opam switch create . ocaml-base-compiler.5.5.0 --no-install --yes
 opam install . --deps-only --with-test --locked --yes
 opam exec -- dune build @all
 opam exec -- dune build @install
-```
-
-Build Apple silicon on arm64 hardware and Intel macOS on x86-64 hardware. Do not
-combine the binaries into a universal executable until every bundled native
-library has matching slices and the combined result passes the full tests.
-
-### 4. Adapt and run the tests
-
-Keep portable unit tests common. Add Darwin-specific tests for every secure
-filesystem operation and its failure modes, including concurrent replacement,
-symlinks, ownership, hard links, lock contention, rollback, and directory
-fsync. Tests that currently count `/proc/self/fd` entries need an equivalent
-Darwin implementation rather than deletion.
-
-Database, Git, sync, retrieval, and publication tests must run against isolated
-resources. Never point a porting test at production Neon. If the Debian local
-database harness remains Linux-only, record that gap and do not describe the
-macOS target as fully supported.
-
-At minimum, run:
-
-```bash
-opam exec -- dune build @all
-opam exec -- dune build @install
-opam exec -- dune runtest
+opam exec -- dune runtest test/unit
 opam lint clamp.opam
+opam exec -- dune exec test/unit/secure_fs_test.exe
+test/run-macos-integration /absolute/private/postgresql-prefix
 ```
 
-### 5. Build a macOS package
+For a focused rerun, append exactly one suite name: `phase3_database_test`,
+`phase5_sync_test`, `phase7_publication_test`, or `phase8_workflow_test`.
+Omitting it runs all four. Finish builds before starting the harness so Dune
+does not remove live Alcotest logs from its build directory.
 
-Do not reuse `release/build`; it intentionally rejects non-Linux hosts. Add a
-target-specific builder or parameterize the existing builder without weakening
-the Linux path. Choose the minimum macOS version before building the executable
-and bundled libraries. A macOS package needs to:
+The integration harness accepts a PostgreSQL installation prefix, **never a
+database URL**. It replaces the environment, creates a mode-0700 temporary
+cluster, binds only `127.0.0.1` and a private Unix socket, checks PostgreSQL
+15.19/pgvector 0.8.1 and exact data-directory identity, and removes the cluster
+after the selected suites. Command-scoped `caffeinate -i` inhibits idle sleep
+without changing persistent power settings; manual sleep can still interrupt
+tests. Runtime `--local-database` remains Debian-only. The
+integration-only scoped target seam cannot be selected by CLI or environment.
+The test helper uses only explicitly identified private sockets; production
+Neon/OpenRouter services are not part of this harness.
 
-- choose and document an architecture-specific asset name;
-- copy `kb`, migrations, templates, version markers, license, and notices;
-- inspect dependencies with `otool -L` rather than `ldd`;
-- use relocatable Mach-O install names such as `@loader_path/../lib`;
-- bundle permitted non-system `.dylib` dependencies and rewrite their install
-  names where necessary;
-- verify every dependency resolves inside the package or to an allowed macOS
-  system library;
-- preserve deterministic file ordering, timestamps, and modes in the unsigned
-  staging tree and document how signing affects reproducibility;
-- handle code signing, hardened runtime, and notarization as explicit release
-  steps;
-- test the extracted package under a clean environment on the minimum supported
-  macOS version.
+## Darwin filesystem guarantees
 
-Choose target-specific asset and archive-root names before porting `kb upgrade`.
-Port executable discovery and atomic installation, and validate the tar
-commands and size-listing parser against the target's archive tool. Preserve
-the archive-layout checks, extracted-size ceiling, and candidate-version check.
+`Secure_fs` keeps platform selection in C. Linux retains `O_PATH`, `renameat2`,
+real link counts, and fsync. Darwin uses `O_EVTONLY`/`O_SYMLINK`, descriptor-bound
+fchmod, nanosecond stat fields, flock, and `renameatx_np` with `RENAME_EXCL` and
+`RENAME_SWAP`. There is no ordinary-rename or check-then-overwrite fallback.
+Directory traversal rejects unqualified filesystems before mutation.
 
-Self-upgrade is for standalone packages. Setup-managed installations must
-continue to update their runtime lock and rerun setup. See
-[Releases and upgrades](./releases.md).
+Darwin still checks entry access permissions. Private directories are created
+with their final 0700 mode while temporarily restoring a restrictive umask;
+this C operation has no runtime callbacks and assumes Clamp's synchronous,
+single-threaded execution. Foreign inaccessible entries fail closed.
 
-Repository templates also need an explicit decision. Today they install the
-pinned Linux orb runtime. A native macOS consumer template must encode its
-target in the pinned runtime URL, runtime root, and setup logic, while an
-Amp-hosted knowledge repository should continue using its Linux orb pin.
+APFS can retain a deleted directory's old link count while a read descriptor
+is open. Directory removal therefore uses a freshly registered descriptor-bound
+kqueue `NOTE_DELETE` witness immediately before the final validated rmdir.
+The event is polled without waiting, latched through durability retries, and
+explicitly closed. Rename alone and deletion of a replacement are not proof.
+Do not reuse a watch across exchange: Darwin may report DELETE for an exchange
+destination. Linux continues to require a real zero link count. File hard-link
+identity and count assertions are unchanged.
 
-### 6. Verify on a clean machine
+Local, Initializer, and Upgrade route durability through `Secure_fs.fsync`.
+On Darwin it requires local APFS, calls fsync then `F_FULLFSYNC`, including on
+parent directories, and never silently reduces the guarantee. Successful native
+tests establish syscall behavior, not simulated power-loss or storage-hardware
+qualification. Linux retains its existing fsync behavior and fault seams.
 
-Test each architecture independently on a machine or VM with no third-party
-toolchain or libraries installed. After verifying the candidate archive's
-checksum, the extracted package must run at least:
+APFS rejects invalid UTF-8 names and aliases case-equivalent names. Tests assert
+these filesystem outcomes rather than expecting impossible Linux directory
+fixtures. Malformed content tests still run. Git-object collision tests construct
+both paths directly in the index, so native synchronization still validates
+hostile case-colliding trees independently of worktree capabilities.
+
+## Native macOS verification packages
+
+After building, run `release/build-macos` with explicit license files for every
+bundled non-system dylib. For a private PostgreSQL/OpenSSL build:
 
 ```bash
-env -i HOME="$PWD/clean-home" PATH=/usr/bin:/bin \
-  ./clamp-X.Y.Z-macos-ARCH/bin/kb --version
-env -i HOME="$PWD/clean-home" PATH=/usr/bin:/bin \
-  ./clamp-X.Y.Z-macos-ARCH/bin/kb --json --help
+release/build-macos \
+  --library-license libpq.5.dylib=/private/source/postgresql-15.19/COPYRIGHT \
+  --library-license libssl.3.dylib=/private/source/openssl-3.5.5/LICENSE.txt \
+  --library-license libcrypto.3.dylib=/private/source/openssl-3.5.5/LICENSE.txt
 ```
 
-Then exercise validation, local mutations, task/TODO updates, Git operations,
-and every target-supported external workflow. Record the OS version,
-architecture, package checksum, command output, and unsupported features. A
-package is not a production release until this evidence is reviewed. Obtain
-operator approval before publishing.
+The builder copies only the executable, allowed dependencies, migrations,
+portable templates, markers, licenses, and notices. It discovers dylibs with
+`otool`, rewrites package-relative names with `install_name_tool`, rejects
+unresolved dependencies, checks arm64 and the deployment floor, normalizes
+archive order/modes/timestamps, and checks extracted `--version` and JSON help
+with an empty environment. Build twice and compare the archive SHA-256.
+
+No developer signing, hardened-runtime configuration, notarization, or release
+publication is performed. Native linker/tool-generated ad-hoc metadata is not
+developer identity or Gatekeeper approval. These remain separately authorized
+release gates, together with clean-machine installation/upgrade, power-loss
+qualification, Linux regression, and the later real-service end-to-end gates
+in [PLAN.md](../PLAN.md). A dirty-checkout verification archive is not an
+artifact suitable for publication, even though its REVISION names its base.
 
 ## Other targets
 

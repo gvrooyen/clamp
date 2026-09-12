@@ -1,10 +1,15 @@
+(library
+ (name disposable_database)
+ (modules disposable_database)
+ (libraries clamp postgresql unix))
+
 (test
  (name phase3_database_test)
  (modules phase3_database_test)
  (deps
   ../../db/migrations/0001_enable_vector.sql
   ../../db/migrations/0002_application_schema.sql)
- (libraries clamp alcotest postgresql unix))
+ (libraries clamp alcotest postgresql unix disposable_database))
 
 (test
  (name phase5_sync_test)
@@ -14,7 +19,7 @@
   ../../clamp.yaml
   ../../db/migrations/0001_enable_vector.sql
   ../../db/migrations/0002_application_schema.sql)
- (libraries clamp alcotest postgresql unix str))
+ (libraries clamp alcotest postgresql unix str disposable_database))
 
 (test
  (name phase7_publication_test)
@@ -30,7 +35,7 @@
   ../../clamp.yaml
   ../../db/migrations/0001_enable_vector.sql
   ../../db/migrations/0002_application_schema.sql)
- (libraries clamp alcotest postgresql unix str yojson))
+ (libraries clamp alcotest postgresql unix str yojson disposable_database))
 
 (executable
  (name phase4_openrouter_gate)

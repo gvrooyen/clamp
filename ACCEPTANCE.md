@@ -3,11 +3,11 @@
 ## Status and authority
 
 Clamp v1 and the original implementation phases 0–9 are complete. Version
-0.1.4 is the latest published production release. Release 0.2.0 Phase 1 is
-complete and Oracle-approved. Native filesystem, source-free bootstrap, isolated
-Amp Git, local-runner interfaces, ordinary-update behavior, and disposable
-database feasibility passed on both candidates; no local target is accepted or
-advertised yet.
+0.1.4 is the latest published production release. Release 0.2.0 Phases 1–3 are
+repository-complete. Native filesystem, runtime packaging, source-free
+bootstrap, isolated Amp Git, local-runner interfaces, ordinary-update behavior,
+and disposable database execution passed on both candidates; no local target is
+accepted or advertised for production yet.
 
 [PRD.md](./PRD.md) is authoritative for product behavior. This document maps
 that contract to repository-owned evidence and defines the boundary between
@@ -221,3 +221,36 @@ the final native target archives and exercising those legacy-named Linux bytes
 with the immutable reviewed 0.1.4 executable. That final-artifact compatibility
 check cannot be satisfied by development fixtures and remains operator evidence;
 it does not reopen the Phase 2 metadata implementation.
+
+## 0.2.0 Phase 3 native-runtime acceptance
+
+Phase 3 is repository-complete when the common unit suite passes on Linux
+x86-64 and native Apple silicon; Darwin `Secure_fs` race, failure, locking,
+identity, mode, cleanup, and durability tests pass on local APFS; all four
+integration suites pass through the isolated macOS PostgreSQL/pgvector harness;
+Linux integrations remain green; repeated clean-snapshot Linux builds are
+byte-identical; and repeated macOS packaging of the same prepared native binary
+is byte-identical. `initializer_test` and `upgrade_test` inject
+pre-install tree-synchronization and post-exchange parent-flush failures;
+`upgrade_test` also proves restoration or an honest `upgrade_state_uncertain`
+result without deleting foreign target or parent replacements.
+
+The detailed native environment, commands, package checks, diagnosed platform
+differences, and observed archive digests are recorded in
+[Phase 3 native macOS verification](./docs/macos-phase3.md). The macOS builder
+must reject noncanonical dependency paths, bundle every permitted non-system
+dylib with its license, retain only package-relative install names, and run the
+extracted executable under an empty environment. Runtime `--local-database` and
+Orb lifecycle scripts remain Linux-only; macOS integration uses only a supplied
+private disposable PostgreSQL prefix.
+
+The repeated macOS package checks package the already prepared native binary;
+they prove deterministic archive construction, not two independent source
+rebuilds. Final committed-candidate source reproducibility remains a release
+gate.
+
+Repository completion does not approve a 0.2 release. Developer signing,
+hardened runtime, notarization, Gatekeeper checks, clean-machine
+installation/upgrade, physical power-loss/storage qualification, immutable
+0.1.4 updater compatibility, final committed-asset reproducibility, production
+services, and publication remain separately authorized release gates.

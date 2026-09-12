@@ -954,7 +954,12 @@ let local_setting name =
             |> unquote_setting)
       else error Validation "local_cluster_unavailable" "Local PostgreSQL 15 main cluster configuration is invalid.")
 
+let local_target_for_tests = ref None
+
 let discover_local_target () =
+  match !local_target_for_tests with
+  | Some target -> Ok target
+  | None ->
   Result.bind (local_setting "port") (fun port_text ->
       Result.bind (local_setting "unix_socket_directories") (fun socket_directories ->
           Result.bind (local_setting "data_directory") (fun data_directory ->
@@ -1573,6 +1578,16 @@ let with_migrations directory operation =
       else operation migrations)
 
 module For_tests = struct
+  let with_local_target target action =
+    if not (String.starts_with ~prefix:"/private/tmp/clamp-db-" target.socket_dir)
+       || not (String.ends_with ~suffix:"/socket" target.socket_dir)
+       || target.data_directory <> Filename.concat (Filename.dirname target.socket_dir) "data"
+       || target.port < 1024 || target.port > 65535
+    then invalid_arg "private disposable socket target required";
+    let previous = !local_target_for_tests in
+    Fun.protect ~finally:(fun () -> local_target_for_tests := previous)
+      (fun () -> local_target_for_tests := Some target; action ())
+
   type nonrec ledger_constraint_row = ledger_constraint_row
   let ledger_constraint_row ~constraint_type ~name ~definition ~key
       ?(key_dimensions = 1) ?(key_length = 1) ?(key_lower_bound = 1)

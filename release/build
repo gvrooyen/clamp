@@ -19,8 +19,8 @@ cd "$repo_root"
 opam install . --deps-only --with-test --locked --yes
 opam exec -- dune build --release bin/kb.exe
 unit_tests=(
-  contract_test upgrade_test phase1_test phase2_test phase3_test phase4_test
-  phase6_test phase8_skill_test initializer_test
+  contract_test secure_fs_test upgrade_test phase1_test phase2_test phase3_test
+  phase4_test phase6_test phase8_skill_test initializer_test
 )
 unit_test_targets=()
 for test in "${unit_tests[@]}"; do

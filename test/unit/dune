@@ -1,4 +1,9 @@
 (test
+ (name secure_fs_test)
+ (modules secure_fs_test)
+ (libraries clamp alcotest unix))
+
+(test
  (name contract_test)
  (modules contract_test)
  (libraries clamp alcotest yojson unix))
@@ -51,6 +56,7 @@
 
 (test
  (name phase9_acceptance_test)
+ (enabled_if (= %{system} linux))
  (modules phase9_acceptance_test)
  (deps
   ../../.agents/phase9-acceptance
@@ -117,3 +123,9 @@
     DUNE_SOURCEROOT
     %{workspace_root}
     (run python3 %{dep:runtime_metadata_test.py})))))
+
+(rule
+ (alias runtest)
+ (deps ../../release/build-macos build_macos_test.py)
+ (action
+  (run python3 %{dep:build_macos_test.py} %{dep:../../release/build-macos})))

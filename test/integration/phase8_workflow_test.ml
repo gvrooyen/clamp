@@ -12,7 +12,10 @@ let command program arguments =
   | Unix.WEXITED 0 -> ()
   | _ -> Alcotest.failf "%s failed" program
 
-let git repo arguments = command "/usr/bin/git" ("-C" :: repo :: arguments)
+let git repo arguments =
+  command "/usr/bin/git"
+    ([ "-c"; "commit.gpgsign=false"; "-c"; "core.hooksPath=/dev/null";
+       "-C"; repo ] @ arguments)
 
 let run_output program arguments =
   let output_path = Filename.temp_file "clamp-phase8-output" ".txt" in
@@ -139,7 +142,7 @@ let quote_identifier value =
 
 let target =
   lazy
-    (match Clamp.Database.discover_local_target () with
+    (match Disposable_database.discover () with
     | Ok target -> target
     | Error failure -> Alcotest.failf "local target: %s" failure.message)
 
@@ -159,6 +162,7 @@ let scalar (connection : Postgresql.connection) statement =
 
 let postgres database statement =
   let target = Lazy.force target in
+  if Disposable_database.administer target database statement then () else
   command "/usr/bin/sudo"
     [ "-u"; "postgres"; "/usr/bin/env"; "-i";
       "HOME=/var/lib/postgresql"; "USER=postgres"; "LOGNAME=postgres";
@@ -485,16 +489,17 @@ let degraded_local_fallback () =
       Alcotest.(check bool) "fallback is explicitly non-semantic" false
         (details |> member "semantic_equivalent" |> to_bool);
       let rg =
-        if Sys.file_exists "/usr/local/bin/rg" then "/usr/local/bin/rg"
-        else "/usr/bin/rg"
+        List.find_opt Sys.file_exists [ "/usr/local/bin/rg"; "/usr/bin/rg" ]
       in
       let matches =
-        run_output rg
-          [ "-n"; "-i"; "--glob"; "*.md"; "--";
-            "initial_local_fallback_sentinel";
-            Filename.concat env.clone "knowledge" ]
+        let arguments = [ "--"; "initial_local_fallback_sentinel";
+                          Filename.concat env.clone "knowledge" ] in
+        match rg with
+        | Some rg -> run_output rg ([ "-n"; "-i"; "--glob"; "*.md" ] @ arguments)
+        | None -> run_output "/usr/bin/grep"
+            ([ "-R"; "-n"; "-i"; "--include=*.md" ] @ arguments)
       in
-      Alcotest.(check bool) "local rg finds durable Markdown" true
+      Alcotest.(check bool) "local text search finds durable Markdown" true
         (contains matches "knowledge/facts/initial.md");
       let simulated =
         Clamp.Retrieval.cli_result
@@ -620,7 +625,7 @@ let conflict_preservation_before_email_request () =
         [ local_body; "Remote conflicting body"; "OPENROUTER_API_KEY";
           "KB_DATABASE_URL"; "postgresql://" ])
 
-let () =
+let () = Disposable_database.run (fun () ->
   Alcotest.run "Phase 8 end-to-end agent workflow"
     [ ( "workflow",
         [ Alcotest.test_case "fresh sync through publish and resync" `Quick
@@ -628,4 +633,4 @@ let () =
           Alcotest.test_case "classified outage uses local fallback" `Quick
             degraded_local_fallback;
           Alcotest.test_case "conflict preservation gates one email request"
-            `Quick conflict_preservation_before_email_request ] ) ]
+            `Quick conflict_preservation_before_email_request ] ) ])

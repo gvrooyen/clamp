@@ -174,6 +174,143 @@ let rejects_without_side_effects () =
       | Ok _ -> Alcotest.fail "existing target replaced");
       Alcotest.(check string) "existing target preserved" "owner data\n" (read marker))
 
+let parent_durability_failure_is_uncertain () =
+  let parent = Filename.temp_file "clamp-init-durability-" "" in
+  Sys.remove parent;
+  Unix.mkdir parent 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Sys.command ("rm -rf -- " ^ Filename.quote parent)))
+    (fun () ->
+      let templates = runtime_root (Filename.concat parent "runtime") in
+      let target = Filename.concat parent "private-clamp" in
+      let parent_stat = Unix.stat parent in
+      let result =
+        Clamp.Secure_fs.For_test.with_fsync_error_hook
+          (fun descriptor ->
+            let stat = Unix.fstat descriptor in
+            if stat.st_dev = parent_stat.st_dev && stat.st_ino = parent_stat.st_ino
+            then raise (Unix.Unix_error (Unix.EIO, "fsync", "")))
+          (fun () -> create templates target)
+      in
+      Alcotest.(check string) "post-install fsync has a stable uncertain code"
+        "init_state_uncertain"
+        (match result with
+        | Error failure -> failure.code
+        | Ok _ -> Alcotest.fail "failed parent durability reported success");
+      Alcotest.(check bool) "fully formed target remains reviewable" true
+        (Sys.file_exists (Filename.concat target ".git/HEAD"));
+      Sys.readdir parent
+      |> Array.iter (fun name ->
+             Alcotest.(check bool) ("no initializer staging residue: " ^ name)
+               false (String.starts_with ~prefix:".private-clamp.clamp-init-" name)))
+
+let preinstall_tree_sync_failure_preserves_target () =
+  let parent = Filename.temp_file "clamp-init-tree-sync-" "" in
+  Sys.remove parent;
+  Unix.mkdir parent 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Sys.command ("rm -rf -- " ^ Filename.quote parent)))
+    (fun () ->
+      let templates = runtime_root (Filename.concat parent "runtime") in
+      let target = Filename.concat parent "private-clamp" in
+      let injected = ref false in
+      let result =
+        Clamp.Secure_fs.For_test.with_sync_tree_error_hook
+          (fun () ->
+            injected := true;
+            raise (Unix.Unix_error (Unix.EIO, "sync_tree", "")))
+          (fun () -> create templates target)
+      in
+      Alcotest.(check bool) "tree-sync fault injected" true !injected;
+      Alcotest.(check string) "preinstall failure code" "init_failed"
+        (match result with
+        | Error failure -> failure.code
+        | Ok _ -> Alcotest.fail "unsynchronized repository installed");
+      Alcotest.(check bool) "target absent" false (Sys.file_exists target);
+      Sys.readdir parent
+      |> Array.iter (fun name ->
+             Alcotest.(check bool) ("no failed staging residue: " ^ name) false
+               (String.starts_with ~prefix:".private-clamp.clamp-init-" name)))
+
+let parent_substitution_during_tree_sync_is_uncertain () =
+  let root = Filename.temp_file "clamp-init-parent-race-" "" in
+  Sys.remove root;
+  Unix.mkdir root 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Sys.command ("rm -rf -- " ^ Filename.quote root)))
+    (fun () ->
+      let parent = Filename.concat root "container" in
+      Unix.mkdir parent 0o700;
+      let templates = runtime_root (Filename.concat root "runtime") in
+      let target = Filename.concat parent "private-clamp" in
+      let replaced = ref false in
+      let result =
+        Clamp.Secure_fs.For_test.with_sync_tree_error_hook
+          (fun () ->
+            if not !replaced then begin
+              replaced := true;
+              let staged =
+                Sys.readdir parent |> Array.to_list
+                |> List.find
+                     (String.starts_with
+                        ~prefix:".private-clamp.clamp-init-")
+              in
+              Unix.rename parent (Filename.concat root "detached");
+              Unix.mkdir parent 0o700;
+              Unix.mkdir (Filename.concat parent staged) 0o700
+            end)
+          (fun () -> create templates target)
+      in
+      Alcotest.(check bool) "parent substitution injected" true !replaced;
+      Alcotest.(check string) "parent substitution is uncertain"
+        "init_state_uncertain"
+        (match result with Error failure -> failure.code
+         | Ok _ -> Alcotest.fail "substituted parent reported success");
+      let foreign_stage =
+        Sys.readdir parent |> Array.to_list
+        |> List.find
+             (String.starts_with ~prefix:".private-clamp.clamp-init-")
+      in
+      Alcotest.(check bool) "foreign stage preserved" true
+        (Sys.file_exists (Filename.concat parent foreign_stage)))
+
+let target_replacement_during_final_flush_is_uncertain () =
+  let parent = Filename.temp_file "clamp-init-final-race-" "" in
+  Sys.remove parent;
+  Unix.mkdir parent 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Sys.command ("rm -rf -- " ^ Filename.quote parent)))
+    (fun () ->
+      let templates = runtime_root (Filename.concat parent "runtime") in
+      let target = Filename.concat parent "private-clamp" in
+      let parent_stat = Unix.stat parent and replaced = ref false in
+      let result =
+        Clamp.Secure_fs.For_test.with_fsync_error_hook
+          (fun descriptor ->
+            let stat = Unix.fstat descriptor in
+            if
+              (not !replaced) && stat.st_dev = parent_stat.st_dev
+              && stat.st_ino = parent_stat.st_ino
+            then begin
+              replaced := true;
+              Unix.rename target (Filename.concat parent "displaced-generated");
+              Unix.mkdir target 0o700;
+              write (Filename.concat target "foreign") "preserve\n"
+            end)
+          (fun () -> create templates target)
+      in
+      Alcotest.(check bool) "target replacement injected" true !replaced;
+      Alcotest.(check string) "final target replacement is uncertain"
+        "init_state_uncertain"
+        (match result with Error failure -> failure.code
+         | Ok _ -> Alcotest.fail "replaced target reported success");
+      Alcotest.(check string) "foreign target preserved" "preserve\n"
+        (read (Filename.concat target "foreign")))
+
 let () =
   Alcotest.run "Clamp private repository initialization"
     [ ("init",
@@ -182,4 +319,12 @@ let () =
          Alcotest.test_case "complete v2 source-free repository" `Quick
            complete_v2_repository;
          Alcotest.test_case "invalid and existing targets" `Quick
-           rejects_without_side_effects ]) ]
+           rejects_without_side_effects;
+         Alcotest.test_case "post-install durability uncertainty" `Quick
+           parent_durability_failure_is_uncertain;
+         Alcotest.test_case "preinstall tree durability failure" `Quick
+           preinstall_tree_sync_failure_preserves_target;
+         Alcotest.test_case "parent substitution during tree sync" `Quick
+           parent_substitution_during_tree_sync_is_uncertain;
+         Alcotest.test_case "target replacement during final flush" `Quick
+           target_replacement_during_final_flush_is_uncertain ]) ]

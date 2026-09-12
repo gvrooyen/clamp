@@ -288,6 +288,15 @@ before extraction or execution.
 
 ## Phase 3: Native macOS runtime and packages
 
+**Status: complete.** The Darwin filesystem backend, target-specific build and
+link boundaries, disposable native database harness, deterministic unsigned
+package builder, and cross-platform regression coverage are implemented and
+verified on Linux x86-64 and native Apple-silicon macOS. Evidence is recorded
+in [docs/macos-phase3.md](docs/macos-phase3.md). Signing/notarization, separate
+clean-machine and physical-storage qualification, immutable historical-binary
+compatibility, and final committed-release artifacts remain release/operator
+gates, not Phase 3 implementation work.
+
 ### Deliverables
 
 - Preserve the OCaml `Secure_fs` contract behind target-specific C backends.

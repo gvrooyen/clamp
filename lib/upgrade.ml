@@ -188,7 +188,7 @@ let write_file path contents =
           if count = 0 then raise End_of_file else write (offset + count)
       in
       write 0;
-      Unix.fsync descriptor)
+      Secure_fs.fsync descriptor)
 
 let read_file_limited path maximum =
   let channel = open_in_bin path in
@@ -225,6 +225,16 @@ let rec remove_tree path =
   | _ -> Unix.unlink path
 
 let cleanup path = try if Sys.file_exists path then remove_tree path with _ -> ()
+
+let path_exists path =
+  try ignore (Unix.lstat path); true
+  with Unix.Unix_error (Unix.ENOENT, _, _) -> false
+
+let cleanup_strict path =
+  try
+    if path_exists path then remove_tree path;
+    not (path_exists path)
+  with _ -> false
 
 let valid_archive_path ~root path =
   let path = if String.ends_with ~suffix:"/" path then String.sub path 0 (String.length path - 1) else path in
@@ -606,6 +616,130 @@ let detected_target () =
 
 let same_identity left right = left.Secure_fs.device = right.Secure_fs.device && left.inode = right.inode
 
+let entry_absent parent name =
+  try ignore (Secure_fs.inspect parent name); false
+  with Unix.Unix_error (Unix.ENOENT, _, _) -> true
+
+let cleanup_expected ~guard ?retained parent_fd name expected =
+  try
+    let _, observed = Secure_fs.inspect parent_fd name in
+    if not (same_identity expected observed) then false
+    else begin
+      let descriptor, close_descriptor =
+        match retained with
+        | Some descriptor -> (descriptor, false)
+        | None -> (Secure_fs.open_path_at parent_fd name, true)
+      in
+      Fun.protect
+        ~finally:(fun () -> if close_descriptor then Unix.close descriptor)
+        (fun () ->
+          Secure_fs.remove_tree_at ~validate:guard parent_fd name descriptor
+            expected);
+      guard () && entry_absent parent_fd name
+    end
+  with _ -> false
+
+let directory_path_matches path descriptor expected =
+  try
+    let observed = Secure_fs.open_directory path in
+    Fun.protect ~finally:(fun () -> Unix.close observed) (fun () ->
+        same_identity expected (Secure_fs.descriptor_identity observed)
+        && same_identity expected (Secure_fs.descriptor_identity descriptor))
+  with _ -> false
+
+let exchange_state_matches ~parent_path ~parent_fd ~parent_identity ~target_name
+    ~target_identity ~stage_name ~stage_identity =
+  directory_path_matches parent_path parent_fd parent_identity
+  && (try
+        let _, target = Secure_fs.inspect parent_fd target_name
+        and _, stage = Secure_fs.inspect parent_fd stage_name in
+        same_identity target_identity target && same_identity stage_identity stage
+      with _ -> false)
+
+let uncertain message =
+  error Internal "upgrade_state_uncertain" message
+
+let finalize_exchange ~parent_path ~parent_fd ~parent_identity ~target_name
+    ~stage_component ~original ~original_descriptor ~candidate
+    ~candidate_descriptor ~candidate_snapshot success =
+  let forward_guard () =
+    exchange_state_matches ~parent_path ~parent_fd ~parent_identity
+      ~target_name ~target_identity:candidate ~stage_name:stage_component
+      ~stage_identity:original
+    && same_identity candidate
+         (Secure_fs.descriptor_identity candidate_descriptor)
+    && same_identity original
+         (Secure_fs.descriptor_identity original_descriptor)
+    && Secure_fs.tree_matches candidate_descriptor candidate_snapshot
+  in
+  let restored_guard () =
+    exchange_state_matches ~parent_path ~parent_fd ~parent_identity
+      ~target_name ~target_identity:original ~stage_name:stage_component
+      ~stage_identity:candidate
+    && same_identity candidate
+         (Secure_fs.descriptor_identity candidate_descriptor)
+    && same_identity original
+         (Secure_fs.descriptor_identity original_descriptor)
+  in
+  match (try Secure_fs.fsync parent_fd; true with _ -> false) with
+  | true ->
+      if not (forward_guard ())
+      then uncertain "The Clamp installation changed during durability finalization."
+      else if not
+                (cleanup_expected ~guard:(fun () ->
+                     directory_path_matches parent_path parent_fd parent_identity
+                     && (try
+                           let _, active = Secure_fs.inspect parent_fd target_name in
+                           same_identity candidate active
+                           && Secure_fs.tree_matches candidate_descriptor
+                                candidate_snapshot
+                         with _ -> false))
+                   ~retained:original_descriptor parent_fd stage_component original)
+      then uncertain "The new Clamp installation is active, but cleanup durability is uncertain."
+      else
+        if
+          directory_path_matches parent_path parent_fd parent_identity
+          && entry_absent parent_fd stage_component
+          && (try
+                let _, active = Secure_fs.inspect parent_fd target_name in
+                same_identity candidate active
+                && Secure_fs.tree_matches candidate_descriptor candidate_snapshot
+              with _ -> false)
+        then Ok success
+        else uncertain "The Clamp installation changed during durability finalization."
+  | false ->
+      if not (forward_guard ())
+      then uncertain "The Clamp installation state is uncertain after a durability failure."
+      else
+        (try
+           Secure_fs.rename_exchange_checked parent_fd target_name parent_fd
+             stage_component ~validate:forward_guard;
+           if not (restored_guard ())
+           then raise Exit;
+           Secure_fs.fsync parent_fd;
+           if not
+                (cleanup_expected ~guard:(fun () ->
+                     directory_path_matches parent_path parent_fd parent_identity
+                     && (try
+                           let _, restored = Secure_fs.inspect parent_fd target_name in
+                           same_identity original restored
+                         with _ -> false))
+                   ~retained:candidate_descriptor parent_fd stage_component
+                   candidate)
+           then raise Exit;
+           if not
+                (directory_path_matches parent_path parent_fd parent_identity
+                 && entry_absent parent_fd stage_component
+                 && (try
+                       let _, restored = Secure_fs.inspect parent_fd target_name in
+                       same_identity original restored
+                     with _ -> false))
+           then raise Exit;
+           error Internal "upgrade_internal_error"
+             "The Clamp upgrade was restored after a durability failure."
+         with _ ->
+           uncertain "The Clamp installation state is uncertain after a durability failure.")
+
 let installation_root () =
   try
     let executable = Unix.realpath Sys.executable_name in
@@ -663,9 +797,9 @@ let install_archive ~current_version ~installation_root ~version ~archive ~check
           let parent = Filename.dirname installation_root in
           let target_name = Filename.basename installation_root in
           let token = random_hex () in
-          let temporary = Filename.concat parent (".clamp-upgrade-" ^ token) in
+          let temporary_name = ".clamp-upgrade-" ^ token in
+          let temporary = Filename.concat parent temporary_name in
           let stage_name = ".clamp-upgrade-stage-" ^ token in
-          let stage = Filename.concat parent stage_name in
           let archive_root = "clamp-" ^ version ^ "-linux-x86_64" in
           let archive_path = Filename.concat temporary (archive_name version) in
           let listing_path = Filename.concat temporary "archive.list" in
@@ -673,19 +807,74 @@ let install_archive ~current_version ~installation_root ~version ~archive ~check
           let version_path = Filename.concat temporary "candidate.version" in
           let extraction = Filename.concat temporary "extract" in
           let parent_descriptor = ref None in
+          let temporary_identity = ref None in
+          let temporary_descriptor = ref None in
+          let temporary_owned = ref false in
+          let stage_owned = ref false in
+          let stage_identity = ref None in
+          let stage_descriptor = ref None in
+          let retained_descriptors = ref [] in
           let exchanged = ref false in
           let finish result =
+            let temporary_clean =
+              if not !temporary_owned then true
+              else
+                match
+                  (!parent_descriptor, !temporary_identity, !temporary_descriptor)
+                with
+                | Some descriptor, Some identity, Some retained ->
+                    let parent_identity = Secure_fs.descriptor_identity descriptor in
+                    cleanup_expected
+                      ~guard:(fun () ->
+                        directory_path_matches parent descriptor parent_identity)
+                      ~retained descriptor temporary_name identity
+                | _ -> false
+            in
+            let stage_clean =
+              match
+                (!stage_owned, !exchanged, !parent_descriptor, !stage_identity,
+                  !stage_descriptor)
+              with
+              | true, false, Some descriptor, Some identity, Some retained ->
+                  let parent_identity = Secure_fs.descriptor_identity descriptor in
+                  cleanup_expected
+                    ~guard:(fun () ->
+                      directory_path_matches parent descriptor parent_identity)
+                    ~retained descriptor stage_name identity
+              | true, false, _, _, _ -> false
+              | _ -> true
+            in
+            let cleanup_ok =
+              temporary_clean && stage_clean
+            in
+            let durable =
+              cleanup_ok
+            in
             Option.iter
               (fun descriptor ->
                 (try Secure_fs.funlock descriptor with _ -> ());
                 Unix.close descriptor)
               !parent_descriptor;
-            cleanup temporary;
-            if not !exchanged then cleanup stage;
-            result
+            List.iter (fun descriptor -> try Unix.close descriptor with _ -> ())
+              !retained_descriptors;
+            if durable then result
+            else
+              error Internal "upgrade_state_uncertain"
+                "The Clamp upgrade cleanup state is uncertain."
           in
           try
-            Unix.mkdir temporary 0o700;
+            let parent_fd = Secure_fs.open_directory parent in
+            parent_descriptor := Some parent_fd;
+            Secure_fs.flock parent_fd true;
+            let parent_identity = Secure_fs.descriptor_identity parent_fd in
+            let retained_temporary =
+              Secure_fs.mkdir_private_at parent_fd temporary_name
+            in
+            temporary_descriptor := Some retained_temporary;
+            retained_descriptors := retained_temporary :: !retained_descriptors;
+            temporary_owned := true;
+            temporary_identity :=
+              Some (Secure_fs.descriptor_identity retained_temporary);
             Unix.mkdir extraction 0o700;
             write_file archive_path archive;
             let listed =
@@ -747,31 +936,81 @@ let install_archive ~current_version ~installation_root ~version ~archive ~check
                     finish
                       (error Transient "upgrade_candidate_invalid"
                          "The downloaded Clamp binary did not report the requested version.")
-                  else
-                    let parent_fd = Secure_fs.open_directory parent in
-                    parent_descriptor := Some parent_fd;
-                    Secure_fs.flock parent_fd true;
+                  else begin
+                    let candidate_snapshot = Secure_fs.sync_tree candidate in
                     let _, original = Secure_fs.inspect parent_fd target_name in
+                    let original_descriptor =
+                      Secure_fs.open_directory_at parent_fd target_name
+                    in
+                    retained_descriptors :=
+                      original_descriptor :: !retained_descriptors;
                     let extraction_fd = Secure_fs.open_directory extraction in
+                    let candidate_descriptor =
+                      Secure_fs.open_directory_at extraction_fd archive_root
+                    in
+                    retained_descriptors :=
+                      candidate_descriptor :: !retained_descriptors;
                     Fun.protect
                       ~finally:(fun () -> Unix.close extraction_fd)
                       (fun () ->
-                        Secure_fs.rename_noreplace extraction_fd archive_root parent_fd stage_name);
+                        Secure_fs.rename_noreplace_checked extraction_fd archive_root
+                          parent_fd stage_name
+                          ~validate:(fun () ->
+                            directory_path_matches parent parent_fd parent_identity
+                            && same_identity original
+                                 (Secure_fs.descriptor_identity original_descriptor)
+                            && Secure_fs.tree_matches candidate_descriptor
+                                 candidate_snapshot));
+                    stage_owned := true;
+                    let _, candidate = Secure_fs.inspect parent_fd stage_name in
+                    stage_identity := Some candidate;
+                    stage_descriptor := Some candidate_descriptor;
                     let _, current = Secure_fs.inspect parent_fd target_name in
                     if not (same_identity original current) then
                       finish
                         (error Internal "upgrade_installation_changed"
                            "The Clamp installation changed during upgrade.")
                     else begin
-                      Secure_fs.rename_exchange parent_fd target_name parent_fd stage_name;
+                      let temporary_clean =
+                        match (!temporary_identity, !temporary_descriptor) with
+                        | Some identity, Some retained ->
+                            cleanup_expected
+                              ~guard:(fun () ->
+                                directory_path_matches parent parent_fd
+                                  parent_identity)
+                              ~retained parent_fd temporary_name identity
+                        | _ -> false
+                      in
+                      if not temporary_clean then raise Exit;
+                      temporary_owned := false;
+                      let pre_exchange_guard () =
+                        exchange_state_matches ~parent_path:parent ~parent_fd
+                          ~parent_identity ~target_name ~target_identity:original
+                          ~stage_name ~stage_identity:candidate
+                        && same_identity original
+                             (Secure_fs.descriptor_identity original_descriptor)
+                        && same_identity candidate
+                             (Secure_fs.descriptor_identity candidate_descriptor)
+                        && Secure_fs.tree_matches candidate_descriptor
+                             candidate_snapshot
+                      in
+                      Secure_fs.rename_exchange_checked parent_fd target_name
+                        parent_fd stage_name ~validate:pre_exchange_guard;
                       exchanged := true;
-                      Unix.fsync parent_fd;
-                      cleanup stage;
-                      finish
-                        (Ok
-                           { previous_version = current_version; version;
-                             installation_root; changed = true })
+                      let success =
+                        { previous_version = current_version; version;
+                          installation_root; changed = true }
+                      in
+                      let result =
+                        finalize_exchange ~parent_path:parent ~parent_fd
+                          ~parent_identity ~target_name
+                          ~stage_component:stage_name ~original
+                          ~original_descriptor ~candidate ~candidate_descriptor
+                          ~candidate_snapshot success
+                      in
+                      finish result
                     end
+                  end
                 end
           with
           | Secure_fs.Atomic_rename_unavailable ->
@@ -789,6 +1028,9 @@ let install_archive ~current_version ~installation_root ~version ~archive ~check
 
 let rec copy_release_tree source target =
   Unix.mkdir target 0o755;
+  copy_release_tree_into source target
+
+and copy_release_tree_into source target =
   Sys.readdir source |> Array.to_list |> List.sort String.compare
   |> List.iter (fun name ->
          let source_path = Filename.concat source name in
@@ -809,54 +1051,91 @@ let rec copy_release_tree source target =
              Unix.chmod target_path mode
          | _ -> raise Exit);
   let descriptor = Unix.openfile target [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
-  Fun.protect ~finally:(fun () -> Unix.close descriptor) (fun () -> Unix.fsync descriptor)
+  Fun.protect ~finally:(fun () -> Unix.close descriptor) (fun () -> Secure_fs.fsync descriptor)
 
 let install_prepared ~current_version ~installation_root (release : release) =
   let parent = Filename.dirname installation_root in
   let target_name = Filename.basename installation_root in
-  let original =
-    try
-      let initial_parent = Secure_fs.open_directory parent in
-      Some
-        (Fun.protect ~finally:(fun () -> Unix.close initial_parent) (fun () ->
-             snd (Secure_fs.inspect initial_parent target_name)))
-    with _ -> None
-  in
   let token = random_hex () in
   let stage_name = ".clamp-upgrade-stage-" ^ token in
   let stage = Filename.concat parent stage_name in
   let parent_descriptor = ref None in
   let stage_owned = ref false in
+  let stage_identity = ref None in
+  let stage_descriptor = ref None in
+  let retained_descriptors = ref [] in
   let exchanged = ref false in
   let finish result =
+    let durable =
+      if !stage_owned && not !exchanged then
+        match (!parent_descriptor, !stage_identity, !stage_descriptor) with
+        | Some descriptor, Some identity, Some retained ->
+            let parent_identity = Secure_fs.descriptor_identity descriptor in
+            cleanup_expected
+              ~guard:(fun () ->
+                directory_path_matches parent descriptor parent_identity)
+              ~retained descriptor stage_name identity
+        | _ -> false
+      else true
+    in
     Option.iter
       (fun descriptor ->
         (try Secure_fs.funlock descriptor with _ -> ());
         Unix.close descriptor)
       !parent_descriptor;
-    if !stage_owned && not !exchanged then cleanup stage;
-    result
+    List.iter (fun descriptor -> try Unix.close descriptor with _ -> ())
+      !retained_descriptors;
+    if durable then result
+    else
+      error Internal "upgrade_state_uncertain"
+        "The Clamp upgrade cleanup state is uncertain."
   in
   try
-    copy_release_tree release.runtime_root stage;
-    stage_owned := true;
     let parent_fd = Secure_fs.open_directory parent in
     parent_descriptor := Some parent_fd;
     Secure_fs.flock parent_fd true;
+    let parent_identity = Secure_fs.descriptor_identity parent_fd in
+    let _, original = Secure_fs.inspect parent_fd target_name in
+    Unix.mkdir stage 0o755;
+    stage_owned := true;
+    let retained_stage = Secure_fs.open_directory_at parent_fd stage_name in
+    stage_descriptor := Some retained_stage;
+    retained_descriptors := retained_stage :: !retained_descriptors;
+    let created_stage = Secure_fs.descriptor_identity retained_stage in
+    stage_identity := Some created_stage;
+    copy_release_tree_into release.runtime_root stage;
+    let candidate_snapshot = Secure_fs.sync_tree stage in
+    let _, candidate = Secure_fs.inspect parent_fd stage_name in
     let _, current = Secure_fs.inspect parent_fd target_name in
-    if not (Option.exists (fun original -> same_identity original current) original) then
+    if
+      not
+        (same_identity created_stage candidate && same_identity original current)
+    then
       finish
         (error Internal "upgrade_installation_changed"
            "The Clamp installation changed during upgrade.")
     else begin
-      Secure_fs.rename_exchange parent_fd target_name parent_fd stage_name;
+      let original_descriptor = Secure_fs.open_directory_at parent_fd target_name in
+      retained_descriptors := original_descriptor :: !retained_descriptors;
+      let pre_exchange_guard () =
+        exchange_state_matches ~parent_path:parent ~parent_fd ~parent_identity
+          ~target_name ~target_identity:original ~stage_name
+          ~stage_identity:candidate
+        && same_identity original
+             (Secure_fs.descriptor_identity original_descriptor)
+        && same_identity candidate
+             (Secure_fs.descriptor_identity retained_stage)
+        && Secure_fs.tree_matches retained_stage candidate_snapshot
+      in
+      Secure_fs.rename_exchange_checked parent_fd target_name parent_fd stage_name
+        ~validate:pre_exchange_guard;
       exchanged := true;
-      Unix.fsync parent_fd;
-      cleanup stage;
-      finish
-        (Ok
-           { previous_version = current_version; version = release.version;
-             installation_root; changed = true })
+      finalize_exchange ~parent_path:parent ~parent_fd ~parent_identity
+        ~target_name ~stage_component:stage_name ~original ~original_descriptor
+        ~candidate ~candidate_descriptor:retained_stage ~candidate_snapshot
+        { previous_version = current_version; version = release.version;
+          installation_root; changed = true }
+      |> finish
     end
   with
   | Secure_fs.Atomic_rename_unavailable ->
@@ -1074,5 +1353,6 @@ module For_test = struct
   let detected_target = detected_target
   let with_manifest_release = with_manifest_release
   let install_archive = install_archive
+  let install_prepared = install_prepared
   let with_release_archive = with_release_archive
 end

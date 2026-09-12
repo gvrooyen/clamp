@@ -12,6 +12,10 @@ done.
 > Current release: [v0.1.4](https://github.com/gvrooyen/clamp/releases/tag/v0.1.4).
 > Requires x86_64 Linux with glibc 2.36 or newer.
 
+Native Apple-silicon macOS development builds and unsigned verification
+packages are available from source; they are not a supported production
+release. See [native build requirements and remaining gates](./docs/building.md#native-macos-build-and-disposable-integration).
+
 ## What Clamp keeps
 
 - [OKF v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/tree/main/okf)

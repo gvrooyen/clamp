@@ -12,7 +12,10 @@ let command program arguments =
   | Unix.WEXITED 0 -> ()
   | _ -> Alcotest.failf "%s failed" program
 
-let git repo arguments = command "/usr/bin/git" ("-C" :: repo :: arguments)
+let git repo arguments =
+  command "/usr/bin/git"
+    ([ "-c"; "commit.gpgsign=false"; "-c"; "core.hooksPath=/dev/null";
+       "-C"; repo ] @ arguments)
 
 let git_succeeds repo arguments =
   let argv = Array.of_list ("git" :: "-C" :: repo :: arguments) in
@@ -414,11 +417,17 @@ let post_rebase_validation () =
   with_environment "post-rebase-collision" (fun env ->
       write (Filename.concat env.clone "knowledge/facts/case.md")
         (fact "Lower case" "Local case path.");
+      let case_alias = Sys.file_exists
+          (Filename.concat env.clone "knowledge/facts/Case.md") in
       write (Filename.concat env.writer "knowledge/facts/Case.md")
         (fact "Upper case" "Remote case path.");
       let remote = commit_writer env "remote case path" in
+      (* Exclusive materialization rejects the second spelling on APFS before
+         Bundle validation can run. Both paths must fail before publication. *)
+      let expected = if case_alias then "publish_validation_materialization_failed"
+          else "publish_validation_failed" in
       ignore
-        (check_error "post-rebase case collision" "publish_validation_failed"
+        (check_error "post-rebase case collision" expected
            (run env));
       Alcotest.(check string) "invalid candidate not pushed" remote
         (git_output env.bare [ "rev-parse"; "refs/heads/main" ]))

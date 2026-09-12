@@ -3,12 +3,14 @@
 ## Status
 
 Clamp v1 and Phases 0–9 are implemented. Version 0.1.4 is the latest published
-production release. Release 0.2.0 Phase 1 contract work is complete; no 0.2.0
-local-machine behavior is implemented or supported yet. The blocking v1 product
-and architecture decisions are resolved; retrieval coefficients remain tunable
-operational defaults rather than product invariants. Repository-owned acceptance
-is local-only; production deployment and release-tag publication remain
-operator-controlled.
+production release. Release 0.2.0 Phases 1–3 are repository-complete: the
+portable runtime metadata and native Linux/macOS runtime-package boundaries are
+implemented, but the local setup, launcher, enrollment, scaffold migration, and
+cross-executor workflow are not implemented or supported yet. The blocking v1
+product and architecture decisions are resolved; retrieval coefficients remain
+tunable operational defaults rather than product invariants. Repository-owned
+acceptance is local-only; production deployment and release-tag publication
+remain operator-controlled.
 
 ## Product summary
 

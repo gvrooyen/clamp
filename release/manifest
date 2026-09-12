@@ -110,6 +110,6 @@ if len(contents) > 1024 * 1024:
     fail("manifest exceeds 1 MiB")
 output.write_bytes(contents)
 digest = hashlib.sha256(contents).hexdigest()
-output.with_name(output.name + ".sha256").write_text(
-    f"{digest}  {output.name}\n", encoding="ascii", newline="\n")
+output.with_name(output.name + ".sha256").write_bytes(
+    f"{digest}  {output.name}\n".encode("ascii"))
 print(output)

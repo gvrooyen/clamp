@@ -715,7 +715,14 @@ let bundle_adversarial () =
   with_bundle (fun root ->
       let knowledge = Filename.concat root "knowledge" in
       let invalid_name = "invalid-\255" in
-      Unix.mkdir (Filename.concat knowledge invalid_name) 0o700;
+      let invalid_path = Filename.concat knowledge invalid_name in
+      let invalid_name_created =
+        try Unix.mkdir invalid_path 0o700; true with
+        | Unix.Unix_error (Unix.EUNKNOWNERR 92, _, _) ->
+            (* APFS rejects non-UTF8 names at the syscall boundary (EILSEQ). *)
+            Alcotest.(check bool) "filesystem rejected invalid name" false (Sys.file_exists invalid_path);
+            false
+      in
       let fifo = Filename.concat knowledge "pipe.md" in
       Unix.mkfifo fifo 0o600;
       write (Filename.concat knowledge "invalid-utf8.md")
@@ -736,12 +743,18 @@ let bundle_adversarial () =
         "---\ntype: fact\nclamp: {asserted_by: human:x}\n---\nUpper.\n";
       write (Filename.concat knowledge "case.md")
         "---\ntype: fact\nclamp: {asserted_by: human:x}\n---\nLower.\n";
+      let distinct_cases =
+        (Unix.stat (Filename.concat knowledge "Case.md")).st_ino <>
+        (Unix.stat (Filename.concat knowledge "case.md")).st_ino
+      in
       let codes = diagnostic_codes (Clamp.Bundle.validate root) in
       List.iter
         (fun code -> Alcotest.(check bool) code true (List.mem code codes))
-        [ "path_component_invalid"; "file_not_regular"; "invalid_utf8";
+        ([ "file_not_regular"; "invalid_utf8";
           "reserved_index_frontmatter"; "link_invalid_uri";
-          "concept_id_invalid"; "path_duplicate" ];
+          "concept_id_invalid" ]
+         @ (if invalid_name_created then ["path_component_invalid"] else [])
+         @ (if distinct_cases then ["path_duplicate"] else []));
       Alcotest.(check bool) "query/fragment and root links resolve" false
         (List.mem "link_unresolved" codes))
 
@@ -912,6 +925,19 @@ let reserved_case_collisions () =
                result.diagnostics);
           Alcotest.(check int) (relative ^ " is not a concept") 0 result.concepts))
     [ "INDEX.md"; "LOG.md"; "nested/INDEX.md"; "nested/LOG.md" ];
+  let case_sensitive = with_bundle (fun root ->
+      let upper = Filename.concat root "Case" in
+      Unix.mkdir upper 0o700;
+      let lower = Filename.concat root "case" in
+      if Sys.file_exists lower then begin
+        Alcotest.(check int) "APFS case aliases identify the same directory"
+          (Unix.stat upper).st_ino (Unix.stat lower).st_ino;
+        Alcotest.check_raises "case-colliding directory cannot be created"
+          (Unix.Unix_error (Unix.EEXIST, "mkdir", lower))
+          (fun () -> Unix.mkdir lower 0o700);
+        false
+      end else true) in
+  if case_sensitive then begin
   let check reserved_name concept_name reserved_body expected_path =
     with_bundle (fun root ->
         let knowledge = Filename.concat root "knowledge" in
@@ -989,6 +1015,7 @@ let reserved_case_collisions () =
            else None));
   Alcotest.(check string) "file/directory creation-order independent"
     (json mixed_forward.diagnostics) (json mixed_reverse.diagnostics)
+  end
 
 let namespace_rules () =
   with_bundle (fun root ->
@@ -1078,7 +1105,7 @@ let diagnostic_limit () =
 
 let descriptor_cleanup () =
   with_bundle (fun root ->
-      let descriptor_count () = Array.length (Sys.readdir "/proc/self/fd") in
+      let descriptor_count = Clamp.Secure_fs.descriptor_count in
       let before = descriptor_count () in
       let interrupted =
         try
@@ -1124,6 +1151,7 @@ let directory_membership_races () =
       let result =
         validate_with_change root (fun () ->
             let lower = Filename.concat knowledge "facts" in
+            let lower = if Sys.file_exists lower then Filename.concat knowledge "other" else lower in
             Unix.mkdir lower 0o700;
             write (Filename.concat lower "b.md") (concept "B."))
       in

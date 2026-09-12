@@ -1,0 +1,63 @@
+#!/bin/bash
+set -euo pipefail
+# Explicit prefix only: never consume PG*, KB_* or an ambient service URL.
+[[ ( $# == 1 || $# == 2 ) && "$1" == /* && "$(/usr/bin/uname -s)" == Darwin && "$(/usr/bin/uname -m)" == arm64 ]] || exit 2
+prefix="$1"
+[[ "$prefix" != *://* && -x "$prefix/bin/pg_ctl" ]] || exit 2
+selection="${2:-all}"
+case "$selection" in
+  all|phase3_database_test|phase5_sync_test|phase7_publication_test|phase8_workflow_test) ;;
+  *) exit 2 ;;
+esac
+repo="$(cd "${BASH_SOURCE[0]%/*}/.." && pwd -P)"
+# No environment marker can bypass sanitation. The child reads only this
+# literal program and explicit, non-URL arguments.
+# Keep idle sleep from invalidating wall-clock deadline tests. The assertion
+# lasts only for this command; no persistent host power setting is changed.
+exec /usr/bin/caffeinate -i /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+  /bin/bash -s -- "$prefix" "$repo" "$selection" <<'HARNESS'
+set -euo pipefail
+prefix="$1"
+repo="$2"
+[[ "$("$prefix/bin/postgres" --version)" == 'postgres (PostgreSQL) 15.19' ]] || exit 2
+root="$(mktemp -d /private/tmp/clamp-db-XXXXXXXX)"
+chmod 700 "$root"
+cleanup() {
+  # Also stop a server whose startup command failed after creating its PID.
+  if [[ -f "$root/data/postmaster.pid" ]]; then
+    "$prefix/bin/pg_ctl" -D "$root/data" -m immediate -w stop >/dev/null
+  fi
+  rm -rf "$root"
+}
+trap cleanup EXIT
+export HOME="$root/home"
+mkdir -m 700 "$HOME" "$root/socket"
+python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()' >"$root/port"
+port="$(cat "$root/port")"
+"$prefix/bin/initdb" -D "$root/data" --no-locale --encoding=UTF8 \
+  --auth-local=trust --auth-host=scram-sha-256 >/dev/null
+/usr/bin/openssl req -new -x509 -nodes -newkey rsa:2048 -days 1 \
+  -subj /CN=localhost -keyout "$root/data/server.key" \
+  -out "$root/data/server.crt" >/dev/null 2>&1
+chmod 600 "$root/data/server.key"
+cat >>"$root/data/postgresql.conf" <<EOF
+listen_addresses = '127.0.0.1'
+port = $port
+unix_socket_directories = '$root/socket'
+ssl = on
+password_encryption = 'scram-sha-256'
+EOF
+"$prefix/bin/pg_ctl" -D "$root/data" -l "$root/postgres.log" -w start >/dev/null
+"$prefix/bin/psql" -X -h "$root/socket" -p "$port" -d postgres \
+  -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION vector' >/dev/null
+[[ "$("$prefix/bin/psql" -XAt -h "$root/socket" -p "$port" -d postgres \
+  -c "SELECT extversion FROM pg_extension WHERE extname='vector'")" == 0.8.1 ]] || exit 2
+export CLAMP_DISPOSABLE_DATABASE="$root" DUNE_SOURCEROOT="$repo"
+cd "$repo/_build/default/test/integration"
+result=0
+for suite in phase3_database_test phase5_sync_test phase7_publication_test phase8_workflow_test; do
+  if [[ "$3" != all && "$3" != "$suite" ]]; then continue; fi
+  "./$suite.exe" </dev/null || result=1
+done
+exit "$result"
+HARNESS

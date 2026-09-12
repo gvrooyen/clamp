@@ -56,8 +56,8 @@ let rename_exchange ~validate olddir oldname newdir newname =
   !operation_hook Rename;
   try Secure_fs.rename_exchange_checked ~validate olddir oldname newdir newname
   with Secure_fs.Rename_validation_failed -> raise Private_cleanup_uncertain
-let fsync_file descriptor = perform File_fsync (fun () -> Unix.fsync descriptor)
-let fsync_dir descriptor = perform Dir_fsync (fun () -> Unix.fsync descriptor)
+let fsync_file descriptor = perform File_fsync (fun () -> Secure_fs.fsync descriptor)
+let fsync_dir descriptor = perform Dir_fsync (fun () -> Secure_fs.fsync descriptor)
 let mkdir_private_path directory name =
   perform Mkdir (fun () -> Secure_fs.mkdir_private_at directory name)
 let open_directory_at directory name =
@@ -357,6 +357,7 @@ type transaction = {
   mutable completion_witnesses : completion_witness list;
   mutable preinstall_witnesses : (unit -> bool) list;
   mutable cleanup_uncertain : bool;
+  mutable removal_witness : Secure_fs.directory_removal option;
 }
 
 type private_entry = {
@@ -494,17 +495,26 @@ let cleanup_created_entry ?(validate_parent = fun () -> true) parent name kind
           && path_matches_descriptor parent name expected_kind descriptor identity
           && descriptor_exact ())
         parent name parent quarantine;
-      if not
-           (path_matches_descriptor parent quarantine expected_kind descriptor identity)
-      then false
-      else begin
+      let watch = match kind with
+        | Private_file -> None
+        | Private_directory -> Some (Secure_fs.watch_directory_removal descriptor)
+      in
+      Fun.protect
+        ~finally:(fun () -> Option.iter Secure_fs.close_directory_removal watch)
+        (fun () ->
+        if not
+             (path_matches_descriptor parent quarantine expected_kind descriptor identity)
+        then false
+        else begin
         (match kind with
         | Private_file -> Secure_fs.unlink_at parent quarantine
         | Private_directory -> Secure_fs.rmdir_at parent quarantine);
         retry recovery_attempts (fun () -> fsync_dir parent);
         validate_parent () && entry_absent parent quarantine
-        && Secure_fs.descriptor_link_count descriptor = 0
-      end
+        && (match watch with
+            | None -> Secure_fs.descriptor_link_count descriptor = 0
+            | Some watch -> Secure_fs.directory_removal_observed watch)
+        end)
   with _ -> false
 
 let create_private_directory ?(validate_parent = fun () -> true) parent name =
@@ -608,7 +618,7 @@ let ensure_private_directory ?(validate_parent = fun () -> true) parent name =
           with Unix.Unix_error _ | Sys_error _ | Failure _ -> uncertain ()))
   | Unix.Unix_error _ | Sys_error _ -> uncertain ()
 
-let capture_and_remove_private_directory ?(validate_parent = fun () -> true)
+let capture_and_remove_private_directory ?retain_witness ?(validate_parent = fun () -> true)
     parent name descriptor identity =
   try
     let quarantine = random_component "quarantine-" in
@@ -620,6 +630,12 @@ let capture_and_remove_private_directory ?(validate_parent = fun () -> true)
       parent name parent quarantine;
     !ownership_hook Before_private_destruct;
     !operation_hook Rmdir;
+    let watch = Secure_fs.watch_directory_removal descriptor in
+    Option.iter (fun retain -> retain watch) retain_witness;
+    Fun.protect
+      ~finally:(fun () ->
+        if Option.is_none retain_witness then Secure_fs.close_directory_removal watch)
+      (fun () ->
     (match inspect_identity parent quarantine with
     | Some captured
       when validate_parent () && private_descriptor ~mode:0o700 parent
@@ -635,7 +651,7 @@ let capture_and_remove_private_directory ?(validate_parent = fun () -> true)
       evaluate (fun () -> private_descriptor ~mode:0o700 parent)
     in
     let removed_directory_nlink =
-      evaluate (fun () -> Secure_fs.descriptor_link_count descriptor = 0)
+      evaluate (fun () -> Secure_fs.directory_removal_observed watch)
     in
     let quarantine_absence =
       evaluate (fun () -> entry_absent parent quarantine)
@@ -646,7 +662,7 @@ let capture_and_remove_private_directory ?(validate_parent = fun () -> true)
       removed_directory_nlink;
     !private_directory_cleanup_proof_hook Quarantine_absence quarantine_absence;
     parent_chain && parent_mode && removed_directory_nlink
-    && quarantine_absence
+    && quarantine_absence)
   with _ -> false
 
 let create_transaction root =
@@ -767,7 +783,7 @@ let create_transaction root =
                           transactions_identity; directory; name;
                           identity = opened_identity; retained = [];
                           completion_witnesses = []; preinstall_witnesses = [];
-                          cleanup_uncertain = false }
+                          cleanup_uncertain = false; removal_witness = None }
                    in
                    transfer_directory := true;
                    result
@@ -863,6 +879,7 @@ let remove_transaction transaction =
   then false
   else
     capture_and_remove_private_directory
+      ~retain_witness:(fun watch -> transaction.removal_witness <- Some watch)
       ~validate_parent:(fun () ->
         transaction_ancestors_valid transaction
         && registered_inputs_valid transaction)
@@ -884,7 +901,8 @@ let with_transaction root action =
       let private_final =
         clean && transaction_ancestors_valid transaction
         && entry_absent transaction.transactions transaction.name
-        && Secure_fs.descriptor_link_count transaction.directory = 0
+        && (try Option.exists Secure_fs.directory_removal_observed transaction.removal_witness
+            with _ -> false)
       in
       let witness_failure =
         if private_final then
@@ -899,6 +917,7 @@ let with_transaction root action =
       in
       close_completion_witnesses transaction;
       close_retained transaction;
+      Option.iter Secure_fs.close_directory_removal transaction.removal_witness;
       close_noerr transaction.directory;
       close_noerr transaction.transactions;
       close_noerr transaction.clamp;
@@ -945,11 +964,15 @@ let remove_private transaction entry =
   else
     let removed = ref false in
     let remaining_links = ref None in
+    let watch = ref None in
+    Fun.protect
+      ~finally:(fun () -> Option.iter Secure_fs.close_directory_removal !watch)
+      (fun () ->
     let removal_is_proven () =
       entry_absent transaction.directory entry.private_name
       && match entry.kind with
          | Private_directory ->
-             Secure_fs.descriptor_link_count entry.descriptor = 0
+             Option.exists Secure_fs.directory_removal_observed !watch
          | Private_file ->
              (match (entry.expected_links, !remaining_links) with
              | Some baseline, remaining ->
@@ -999,6 +1022,9 @@ let remove_private transaction entry =
               | Private_directory ->
                   !ownership_hook Before_directory_cleanup;
                   !operation_hook Rmdir;
+                  Option.iter Secure_fs.close_directory_removal !watch;
+                  watch := None;
+                  watch := Some (Secure_fs.watch_directory_removal entry.descriptor);
                   if not (private_matches transaction entry
                           && private_descriptor ~mode:0o700 entry.descriptor)
                   then raise Exit;
@@ -1012,7 +1038,7 @@ let remove_private transaction entry =
         release_retained transaction entry.descriptor;
         true
       end else false
-    with _ -> false
+    with _ -> false)
 
 let prepare_private_file transaction contents =
   let rec attempt remaining =

@@ -5,7 +5,7 @@ let check_ok name = function
   | Error (error : Clamp.Database.error) ->
       Alcotest.failf "%s: %s (%s)" name error.message error.code
 
-let target = lazy (check_ok "local target" (Clamp.Database.discover_local_target ()))
+let target = lazy (check_ok "local target" (Disposable_database.discover ()))
 let current_user = (Unix.getpwuid (Unix.geteuid ())).pw_name
 let database_counter = ref 0
 
@@ -27,6 +27,7 @@ let command (connection : Postgresql.connection) sql =
 
 let postgres_psql database sql =
   let target = Lazy.force target in
+  if Disposable_database.administer target database sql then () else
   let arguments =
     [| "/usr/bin/sudo"; "-u"; "postgres"; "/usr/bin/env"; "-i";
        "HOME=/var/lib/postgresql"; "USER=postgres"; "LOGNAME=postgres";
@@ -386,8 +387,8 @@ let remote_dns_failover () =
   with_tcp_database "dns_failover" (fun database role password ->
       with_migration_copy (fun root _ ->
           let url = Printf.sprintf
-              "postgresql://%s:%s@does-not-exist.invalid:5432,127.0.0.1:5432/%s?sslmode=require&channel_binding=require"
-              role password database in
+              "postgresql://%s:%s@does-not-exist.invalid:5432,127.0.0.1:%d/%s?sslmode=require&channel_binding=require"
+              role password (Lazy.force target).port database in
           check_report "DNS failure falls through to healthy host"
             [ "0001_enable_vector"; "0002_application_schema" ]
             (Clamp.Database.migrate_remote ~repo:root ~url)))
@@ -395,10 +396,17 @@ let remote_dns_failover () =
 let remote_network_route_failover () =
   with_tcp_database "route_failover" (fun database role password ->
       with_migration_copy (fun root _ ->
+          let first_host, label =
+            if Clamp.Upgrade.For_test.detected_target () = Ok "macos-arm64" then
+              ("::1", "IPv6 refusal falls through to healthy IPv4")
+            else
+              ("2001:db8::1", "unreachable IPv6 route falls through to healthy IPv4")
+          in
           let url = Printf.sprintf
-              "postgresql://%s:%s@[2001:db8::1]:5432,127.0.0.1:5432/%s?sslmode=require&channel_binding=require"
-              role password database in
-          check_report "unreachable IPv6 falls through to healthy IPv4"
+              "postgresql://%s:%s@[%s]:%d,127.0.0.1:%d/%s?sslmode=require&channel_binding=require"
+              role password first_host (Lazy.force target).port
+              (Lazy.force target).port database in
+          check_report label
             [ "0001_enable_vector"; "0002_application_schema" ]
             (Clamp.Database.migrate_remote ~repo:root ~url)))
 
@@ -1068,7 +1076,7 @@ let malformed_current_ledgers () =
   check_case "ledger row security" (fun connection ->
       command connection "ALTER TABLE clamp_schema_migrations ENABLE ROW LEVEL SECURITY")
 
-let () =
+let () = Disposable_database.run (fun () ->
   Alcotest.run "Phase 3 local PostgreSQL"
     [ ("migrations and schema",
        [ Alcotest.test_case "fresh, repeat, drift, constraints" `Quick
@@ -1113,4 +1121,4 @@ let () =
       ("legacy ledger",
        [ Alcotest.test_case "valid prefix upgrade" `Quick legacy_upgrade;
          Alcotest.test_case "invalid legacy rollback" `Quick invalid_legacy_ledgers;
-         Alcotest.test_case "concurrent upgrade" `Quick concurrent_legacy_upgrade ]) ]
+         Alcotest.test_case "concurrent upgrade" `Quick concurrent_legacy_upgrade ]) ])

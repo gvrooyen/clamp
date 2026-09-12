@@ -22,13 +22,13 @@ network or production operations.
   --latest
   --release=X.Y.Z
   $ kb init --source-repository example.invalid/owner/private-clamp --json
-  {"ok":false,"code":"init_runtime_selection_required","message":"Supply exactly one runtime selection: --release X.Y.Z, --latest, or all four explicit --runtime-* pin options.","details":{}}
+  {"ok":false,"code":"init_runtime_selection_required","message":"Supply exactly one runtime selection: --release X.Y.Z, --latest, the four legacy explicit archive pins, or --runtime-version with all four v2 offline manifest options.","details":{}}
   [2]
   $ kb init --repo "$PWD/invalid-release" --source-repository example.invalid/owner/private-clamp --release invalid --json
   {"ok":false,"code":"init_release_version_invalid","message":"--release must be a stable X.Y.Z release version.","details":{}}
   [2]
   $ kb init --source-repository example.invalid/owner/private-clamp --release 0.1.3 --latest --json
-  {"ok":false,"code":"init_runtime_selection_required","message":"Supply exactly one runtime selection: --release X.Y.Z, --latest, or all four explicit --runtime-* pin options.","details":{}}
+  {"ok":false,"code":"init_runtime_selection_required","message":"Supply exactly one runtime selection: --release X.Y.Z, --latest, the four legacy explicit archive pins, or --runtime-version with all four v2 offline manifest options.","details":{}}
   [2]
 
 Retrieval commands fail safely before external access when credentials are absent.

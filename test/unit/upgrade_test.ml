@@ -216,6 +216,24 @@ let atomic_install () =
       let archive = read archive_path in
       let digest = Digestif.SHA256.(to_hex (digest_string archive)) in
       let checksum = digest ^ "  " ^ archive_root ^ ".tar.gz\n" in
+      let sync_fault = ref false in
+      let unsynchronized =
+        Clamp.Secure_fs.For_test.with_sync_tree_error_hook
+          (fun () ->
+            sync_fault := true;
+            raise (Unix.Unix_error (Unix.EIO, "sync_tree", "")))
+          (fun () ->
+            Clamp.Upgrade.For_test.install_archive ~current_version:"0.1.3"
+              ~installation_root:installation ~version:"0.2.0" ~archive
+              ~checksum)
+      in
+      Alcotest.(check bool) "legacy tree-sync fault injected" true !sync_fault;
+      Alcotest.(check string) "legacy preinstall sync failure"
+        "upgrade_internal_error"
+        (match unsynchronized with Error failure -> failure.code
+         | Ok _ -> Alcotest.fail "unsynchronized legacy candidate installed");
+      Alcotest.(check string) "legacy sync failure preserves installation"
+        "0.1.3" (reported_version (Filename.concat installation "bin/kb"));
       let result =
         get_ok
           (Clamp.Upgrade.For_test.install_archive ~current_version:"0.1.3"
@@ -230,6 +248,248 @@ let atomic_install () =
       |> Array.iter (fun name ->
              Alcotest.(check bool) ("no updater residue: " ^ name) false
                (String.starts_with ~prefix:".clamp-upgrade-" name)))
+
+let prepared_install_durability () =
+  with_directory (fun parent ->
+      let installation = Filename.concat parent "installed" in
+      release_layout installation "0.1.4";
+      let candidate = Filename.concat parent "candidate" in
+      release_layout candidate "0.2.0";
+      let release : Clamp.Upgrade.release =
+        { version = "0.2.0"; revision = fixture_revision;
+          target = "linux-x86_64"; url = "https://example.invalid/runtime";
+          sha256 = String.make 64 'a'; manifest_url = None;
+          manifest_sha256 = None; runtime_root = candidate }
+      in
+      let parent_stat = Unix.stat parent and calls = ref 0 in
+      let fail_first_parent_fsync descriptor =
+        let stat = Unix.fstat descriptor in
+        if stat.st_dev = parent_stat.st_dev && stat.st_ino = parent_stat.st_ino
+        then begin
+          incr calls;
+          if !calls = 1 then
+            raise (Unix.Unix_error (Unix.EIO, "fsync", ""))
+        end
+      in
+      let restored =
+        Clamp.Secure_fs.For_test.with_fsync_error_hook fail_first_parent_fsync
+          (fun () ->
+            Clamp.Upgrade.For_test.install_prepared ~current_version:"0.1.4"
+              ~installation_root:installation release)
+      in
+      Alcotest.(check string) "restored durability failure code"
+        "upgrade_internal_error"
+        (match restored with Error failure -> failure.code
+         | Ok _ -> Alcotest.fail "failed durability reported success");
+      Alcotest.(check string) "old installation restored" "0.1.4"
+        (reported_version (Filename.concat installation "bin/kb"));
+      Alcotest.(check int) "first parent flush failed before durable recovery" 3
+        !calls;
+      Sys.readdir parent
+      |> Array.iter (fun name ->
+             Alcotest.(check bool) ("no restored stage residue: " ^ name) false
+               (String.starts_with ~prefix:".clamp-upgrade-stage-" name));
+
+      let always_fail_parent_fsync descriptor =
+        let stat = Unix.fstat descriptor in
+        if stat.st_dev = parent_stat.st_dev && stat.st_ino = parent_stat.st_ino
+        then raise (Unix.Unix_error (Unix.EIO, "fsync", ""))
+      in
+      let uncertain =
+        Clamp.Secure_fs.For_test.with_fsync_error_hook always_fail_parent_fsync
+          (fun () ->
+            Clamp.Upgrade.For_test.install_prepared ~current_version:"0.1.4"
+              ~installation_root:installation release)
+      in
+      Alcotest.(check string) "unrestored durability failure code"
+        "upgrade_state_uncertain"
+        (match uncertain with Error failure -> failure.code
+         | Ok _ -> Alcotest.fail "uncertain durability reported success");
+      Alcotest.(check string) "reverse exchange restored namespace" "0.1.4"
+        (reported_version (Filename.concat installation "bin/kb"));
+      Alcotest.(check bool) "uncertain recovery state is retained" true
+        (Sys.readdir parent |> Array.exists
+           (String.starts_with ~prefix:".clamp-upgrade-stage-")))
+
+let prepared_install_foreign_replacement () =
+  with_directory (fun parent ->
+      let installation = Filename.concat parent "installed" in
+      release_layout installation "0.1.4";
+      let candidate = Filename.concat parent "candidate" in
+      release_layout candidate "0.2.0";
+      let release : Clamp.Upgrade.release =
+        { version = "0.2.0"; revision = fixture_revision;
+          target = "linux-x86_64"; url = "https://example.invalid/runtime";
+          sha256 = String.make 64 'a'; manifest_url = None;
+          manifest_sha256 = None; runtime_root = candidate }
+      in
+      let parent_stat = Unix.stat parent in
+      let replaced = ref false in
+      let replace_before_first_parent_fsync descriptor =
+        let stat = Unix.fstat descriptor in
+        if
+          (not !replaced) && stat.st_dev = parent_stat.st_dev
+          && stat.st_ino = parent_stat.st_ino
+        then begin
+          replaced := true;
+          Unix.rename installation (Filename.concat parent "foreign-displaced");
+          release_layout installation "9.9.9";
+          raise (Unix.Unix_error (Unix.EIO, "fsync", ""))
+        end
+      in
+      let result =
+        Clamp.Secure_fs.For_test.with_fsync_error_hook
+          replace_before_first_parent_fsync (fun () ->
+            Clamp.Upgrade.For_test.install_prepared ~current_version:"0.1.4"
+              ~installation_root:installation release)
+      in
+      Alcotest.(check bool) "fault injected" true !replaced;
+      Alcotest.(check string) "foreign replacement uncertainty"
+        "upgrade_state_uncertain"
+        (match result with Error failure -> failure.code
+         | Ok _ -> Alcotest.fail "foreign replacement reported success");
+      Alcotest.(check string) "foreign target preserved" "9.9.9"
+        (reported_version (Filename.concat installation "bin/kb"));
+      Alcotest.(check bool) "displaced original retained" true
+        (Sys.readdir parent |> Array.exists
+           (String.starts_with ~prefix:".clamp-upgrade-stage-")))
+
+let prepared_install_preinstall_sync_failure () =
+  with_directory (fun parent ->
+      let installation = Filename.concat parent "installed" in
+      release_layout installation "0.1.4";
+      let candidate = Filename.concat parent "candidate" in
+      release_layout candidate "0.2.0";
+      let release : Clamp.Upgrade.release =
+        { version = "0.2.0"; revision = fixture_revision;
+          target = "linux-x86_64"; url = "https://example.invalid/runtime";
+          sha256 = String.make 64 'a'; manifest_url = None;
+          manifest_sha256 = None; runtime_root = candidate }
+      in
+      let injected = ref false in
+      let result =
+        Clamp.Secure_fs.For_test.with_sync_tree_error_hook
+          (fun () ->
+            injected := true;
+            raise (Unix.Unix_error (Unix.EIO, "sync_tree", "")))
+          (fun () ->
+            Clamp.Upgrade.For_test.install_prepared ~current_version:"0.1.4"
+              ~installation_root:installation release)
+      in
+      Alcotest.(check bool) "preinstall sync fault injected" true !injected;
+      Alcotest.(check string) "preinstall sync failure code"
+        "upgrade_internal_error"
+        (match result with Error failure -> failure.code
+         | Ok _ -> Alcotest.fail "unsynchronized candidate installed");
+      Alcotest.(check string) "old installation remains active" "0.1.4"
+        (reported_version (Filename.concat installation "bin/kb"));
+      Alcotest.(check bool) "failed stage removed" false
+        (Sys.readdir parent |> Array.exists
+           (String.starts_with ~prefix:".clamp-upgrade-stage-")))
+
+let prepared_install_stage_replacement_during_sync () =
+  with_directory (fun parent ->
+      let installation = Filename.concat parent "installed" in
+      release_layout installation "0.1.4";
+      let candidate = Filename.concat parent "candidate" in
+      release_layout candidate "0.2.0";
+      let release : Clamp.Upgrade.release =
+        { version = "0.2.0"; revision = fixture_revision;
+          target = "linux-x86_64"; url = "https://example.invalid/runtime";
+          sha256 = String.make 64 'a'; manifest_url = None;
+          manifest_sha256 = None; runtime_root = candidate }
+      in
+      let replaced = ref false and foreign_stage = ref "" in
+      let result =
+        Clamp.Secure_fs.For_test.with_sync_tree_error_hook
+          (fun () ->
+            if not !replaced then begin
+              replaced := true;
+              let stage =
+                Sys.readdir parent |> Array.to_list
+                |> List.find (String.starts_with ~prefix:".clamp-upgrade-stage-")
+              in
+              foreign_stage := stage;
+              Unix.rename (Filename.concat parent stage)
+                (Filename.concat parent "displaced-owned-stage");
+              release_layout (Filename.concat parent stage) "9.9.6"
+            end)
+          (fun () ->
+            Clamp.Upgrade.For_test.install_prepared ~current_version:"0.1.4"
+              ~installation_root:installation release)
+      in
+      Alcotest.(check bool) "stage replacement injected" true !replaced;
+      Alcotest.(check string) "stage replacement is uncertain"
+        "upgrade_state_uncertain"
+        (match result with Error failure -> failure.code
+         | Ok _ -> Alcotest.fail "foreign stage reported successful upgrade");
+      Alcotest.(check string) "foreign stage survives cleanup" "9.9.6"
+        (reported_version
+           (Filename.concat parent (!foreign_stage ^ "/bin/kb")));
+      Alcotest.(check string) "old target remains active" "0.1.4"
+        (reported_version (Filename.concat installation "bin/kb")))
+
+let prepared_install_nonthrowing_replacements () =
+  let run ~replace_parent foreign_version =
+    with_directory (fun root ->
+        let parent = Filename.concat root "container" in
+        Unix.mkdir parent 0o700;
+        let installation = Filename.concat parent "installed" in
+        release_layout installation "0.1.4";
+        let candidate = Filename.concat root "candidate" in
+        release_layout candidate "0.2.0";
+        let release : Clamp.Upgrade.release =
+          { version = "0.2.0"; revision = fixture_revision;
+            target = "linux-x86_64"; url = "https://example.invalid/runtime";
+            sha256 = String.make 64 'a'; manifest_url = None;
+            manifest_sha256 = None; runtime_root = candidate }
+        in
+        let parent_stat = Unix.stat parent and replaced = ref false in
+        let replace_at_first_parent_fsync descriptor =
+          let stat = Unix.fstat descriptor in
+          if
+            (not !replaced) && stat.st_dev = parent_stat.st_dev
+            && stat.st_ino = parent_stat.st_ino
+          then begin
+            replaced := true;
+            if replace_parent then begin
+              let stage =
+                Sys.readdir parent |> Array.to_list
+                |> List.find (String.starts_with ~prefix:".clamp-upgrade-stage-")
+              in
+              Unix.rename parent (Filename.concat root "detached");
+              Unix.mkdir parent 0o700;
+              release_layout installation foreign_version;
+              release_layout (Filename.concat parent stage) "8.8.8"
+            end else begin
+              Unix.rename installation (Filename.concat parent "displaced-candidate");
+              release_layout installation foreign_version
+            end
+          end
+        in
+        let result =
+          Clamp.Secure_fs.For_test.with_fsync_error_hook
+            replace_at_first_parent_fsync (fun () ->
+              Clamp.Upgrade.For_test.install_prepared ~current_version:"0.1.4"
+                ~installation_root:installation release)
+        in
+        Alcotest.(check bool) "nonthrowing replacement injected" true !replaced;
+        Alcotest.(check string) "replacement is reported uncertain"
+          "upgrade_state_uncertain"
+          (match result with Error failure -> failure.code
+           | Ok _ -> Alcotest.fail "replacement reported successful upgrade");
+        Alcotest.(check string) "foreign installation preserved" foreign_version
+          (reported_version (Filename.concat installation "bin/kb"));
+        if replace_parent then
+          Alcotest.(check string) "foreign stage preserved" "8.8.8"
+            (let stage =
+               Sys.readdir parent |> Array.to_list
+               |> List.find (String.starts_with ~prefix:".clamp-upgrade-stage-")
+             in
+             reported_version (Filename.concat parent (stage ^ "/bin/kb"))))
+  in
+  run ~replace_parent:false "9.9.8";
+  run ~replace_parent:true "9.9.7"
 
 let portable_metadata_contract () =
   let module Metadata = Clamp.Runtime_metadata in
@@ -394,6 +654,16 @@ let () =
           Alcotest.test_case "verified release metadata" `Quick
             resolved_release_archive;
           Alcotest.test_case "verified atomic installation" `Quick atomic_install;
+          Alcotest.test_case "prepared-install durability" `Quick
+            prepared_install_durability;
+          Alcotest.test_case "foreign replacement during durability failure"
+            `Quick prepared_install_foreign_replacement;
+          Alcotest.test_case "preinstall tree durability failure" `Quick
+            prepared_install_preinstall_sync_failure;
+          Alcotest.test_case "stage replacement during tree synchronization"
+            `Quick prepared_install_stage_replacement_during_sync;
+          Alcotest.test_case "nonthrowing target and parent replacements" `Quick
+            prepared_install_nonthrowing_replacements;
           Alcotest.test_case "portable metadata contract" `Quick
             portable_metadata_contract;
           Alcotest.test_case "portable tar listing" `Quick portable_tar_listing;
