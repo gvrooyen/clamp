@@ -18,7 +18,7 @@
     "target": [{"name": "target", "type": "identifier", "max_bytes": 64}],
     "target_gate": [{"name": "target", "type": "identifier", "max_bytes": 64}, {"name": "gate", "type": "enum", "values": ["helper", "filesystem", "package", "database", "thread_identity", "owner_email"]}],
     "target_filesystem": [{"name": "target", "type": "identifier", "max_bytes": 64}, {"name": "filesystem", "type": "identifier", "max_bytes": 64}],
-    "prerequisite": [{"name": "prerequisite", "type": "enum", "values": ["amp", "bash", "git", "curl", "python3", "tar", "sha256sum", "rg"]}, {"name": "minimum_version", "type": "version", "max_bytes": 64}],
+    "prerequisite": [{"name": "prerequisite", "type": "enum", "values": ["amp", "bash", "git", "curl", "python3", "tar", "sha256sum", "shasum", "rg"]}, {"name": "minimum_version", "type": "version", "max_bytes": 64}],
     "cause": [{"name": "cause", "type": "enum", "values": ["not_git_repository", "root_mismatch", "gitdir_unsafe", "origin_missing", "origin_not_amp_https", "origin_identity_mismatch", "entry_kind", "owner", "permissions", "symlink", "identity", "schema", "unknown_key", "size", "value", "download", "extract", "verify", "install", "rollback"]}],
     "paths": [{"name": "paths", "type": "path_list", "max_items": 100, "item_max_bytes": 4096}],
     "author_fields": [{"name": "fields", "type": "enum_list", "values": ["user.name", "user.email"], "max_items": 2}],

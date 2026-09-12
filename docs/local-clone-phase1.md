@@ -12,8 +12,9 @@ Status on 2026-09-12:
 - Linux x86-64 on local ext4 is a candidate after native non-Orb testing.
   Filesystem primitives, source-free bootstrap, authenticated read-only Amp
   Git, local-runner thread/owner-email interfaces, and a private
-  PostgreSQL/pgvector harness passed. Ordinary-update requalification remains
-  pending.
+  PostgreSQL/pgvector harness passed. An updater-correlated ordinary Amp update
+  replaced the recorded prior inode and passed official-checksum and full
+  helper/path regression checks.
 - Apple-silicon macOS is now a candidate after native testing on macOS 26.5.2
   (build 25F84). Local writable case-insensitive APFS primitives and a private
   PostgreSQL/pgvector harness passed. The minimum is conservatively fixed to
@@ -22,7 +23,8 @@ Status on 2026-09-12:
   Amp update produced an updater-correlated replacement that passed official-
   checksum and full helper/path regression checks. Runtime porting and packaging
   remain later-phase work.
-- Phase 1 is therefore in progress and must not be marked complete.
+- Phase 1 is complete and Oracle-approved after every contract and native
+  feasibility gate passed; no target is supported yet.
 
 ## Authoritative Amp documentation
 
@@ -71,7 +73,9 @@ Native Linux observations from runner `clamp-linux`:
 | --- | --- | --- |
 | Host | Arch Linux rolling, kernel 7.2.3-arch1-3, native x86-64, glibc 2.44, local ext4 | Provides a native example within the existing Linux x86-64/glibc ≥2.36/ext4 candidate range; it does not directly test the glibc 2.36 boundary or qualify another libc/filesystem. |
 | ext4 primitives | File/directory `fsync`, descriptor `flock`, hard-link identity, `O_NOFOLLOW`, descriptor-relative operations, `renameat2` no-replace/exchange, rollback, and retained-parent replacement detection passed | Native filesystem implementation is feasible; application-level failure injection remains with implementation. |
-| Amp installation | `$HOME/.local/bin/amp` symlink to regular x86-64 ELF `$HOME/.amp/bin/amp`; version `0.0.1789113641-gcd8b8a`; public SHA-256 `b85abf99057ee68be28be6867d2032611d303a3fa6fddaee1d6c2b2d22234185` matched the official checksum; retained chain was safe and unchanged | Freeze this version as the common minimum and the direct-install path as the Linux shape. Ordinary-update requalification remains required. |
+| Amp installation | `$HOME/.local/bin/amp` symlink to regular x86-64 ELF `$HOME/.amp/bin/amp`; current observed version `0.0.1789171288-gd95a61`; public SHA-256 `f34fc8597be9b1b5e5658ab8ebb29a4f2597242cd1c998ab9b845ab424bc8cf4` matched the official checksum; retained chain was safe and unchanged | Qualified direct-install shape. Keep `0.0.1789113641-gcd8b8a` as the common minimum; revalidate the installed executable identity before every credential-helper use. |
+| Ordinary-update evidence | Amp's updater changed the installation through four recorded transitions from `0.0.1789113641-gcd8b8a` to `0.0.1789171288-gd95a61`. The retained updater process still held the deleted prior inode, whose bytes exactly matched the recorded prior SHA-256; both endpoint digests matched official checksums. | Passed with direct updater-mediated inode-replacement evidence. Hourly same-process events strongly support background initiation, but logs contain no explicit automatic/manual trigger field, so no stronger trigger claim is made. |
+| Post-update regression | Direct path and stable symlink retained; executable inode changed; ownership/modes and no-follow retained-parent validation passed; disposable clone, explicit-helper exact-main read-only Git, and runner identity/email interfaces all passed at the new identity and final boundary | The enrollment design can treat changed bytes as untrusted, requalify them, and safely refresh only after all checks pass. |
 | Existing-project clone | Disposable `amp clone user-skills` succeeded. Repository-local helper, `useHttpPath`, author name, and author email were unset; effective helper was `!amp git-credential-helper` with default-false `useHttpPath`. | Publication requires repository-local author configuration. Reconstruct the validated absolute helper rather than trusting ambient configuration. |
 | Isolated authenticated Git | Bounded read-only `ls-remote` succeeded with the absolute helper, explicit `useHttpPath=true`, disabled system/global config and prompts, and only `HOME`, `PATH`, `GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL`, and `GIT_TERMINAL_PROMPT` | Freeze this Linux allowlist and helper invocation for the observed direct-install shape. |
 | Local Amp interfaces | Authenticated runner supplied exact thread ID/URL, current-user identity, and owner-bound `send_email`; no email was sent | Interface feasibility passed; preservation ordering, deduplication, and delivery remain later end-to-end gates. |
@@ -99,18 +103,14 @@ The Orb exposes `AMP_BIN_DIR`, `AMP_API_KEY`, and `AMP_URL`. That is the v1 Orb
 authentication path and is specifically excluded as evidence for a local login
 or local helper environment.
 
-## Remaining Phase 1 feasibility gates
+## Phase 1 feasibility resolution
 
-Before implementation begins, Phase 1 must:
-
-1. Complete ordinary-update requalification on Linux. Mac ordinary-update,
-   local helper, filesystem, database, consumer-bootstrap, and runner-interface
-   feasibility passed.
-2. Freeze each retained target's minimum OS, filesystem, exact source-free
-   consumer bootstrap tools and versions, exact local Amp environment
-   allowlist, and disposable PostgreSQL/pgvector feasibility harness from
-   native evidence. Opam, OCaml, and Dune are build-runner inputs, not consumer
-   prerequisites.
+Both retained targets have passed ordinary-update, local helper, filesystem,
+database, consumer-bootstrap, and runner-interface feasibility. Their minimum
+OS, filesystem, exact source-free consumer bootstrap tools and versions, exact
+local Amp environment allowlists, and disposable PostgreSQL/pgvector harnesses
+are frozen from native evidence. Opam, OCaml, and Dune remain build-runner
+inputs, not consumer prerequisites.
 
 The immutable-client compatibility feasibility gate is resolved. The attempted
 proxy/private-CA mechanism failed closed, and the explicit offline initializer

@@ -162,16 +162,14 @@ requiring PRD review and migration/reindex planning.
 
 ## Phase 1: Freeze the 0.2 contract and fixtures
 
-**Status: in progress.** The repository-owned contract, sanitized fixtures,
-tests, and immutable-0.1.4 prepublication compatibility mechanism are
-implemented and Oracle-reviewed with no repository-owned blockers. Native
-Linux ordinary-update requalification remains pending; Mac passed it.
-Native ext4/APFS, source-free consumer bootstrap, isolated authenticated read-
-only Amp Git, local-runner identity/notification interfaces, and disposable
-database feasibility have passed on both candidate targets. Native runtime/package,
-application durability, signing, and end-to-end work remain later-phase gates,
-not Phase 1 prerequisites. Phase 1 is not complete and no local target is
-supported yet.
+**Status: complete.** The repository-owned contract, sanitized fixtures, tests,
+and immutable-0.1.4 prepublication compatibility mechanism are implemented and
+Oracle-approved. Native ext4/APFS, source-free consumer bootstrap, isolated
+authenticated read-only Amp Git, local-runner identity and notification
+interfaces, ordinary-update behavior, and disposable database feasibility have
+passed on both candidate targets. Native runtime/package, application
+durability, signing, and end-to-end work remain later-phase gates, not Phase 1
+prerequisites. No local target is supported yet.
 
 ### Deliverables
 

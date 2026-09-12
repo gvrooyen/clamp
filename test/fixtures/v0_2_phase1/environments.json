@@ -11,12 +11,15 @@
     },
     {
       "name": "local_linux_direct_install",
-      "state": "candidate_pending_ordinary_update",
+      "state": "qualified_ordinary_update",
       "executor": "local",
       "amp_path_shape": "$HOME/.amp/bin/amp",
       "path_entry_shape": "$HOME/.local/bin/amp -> $HOME/.amp/bin/amp",
-      "observed_amp_version": "0.0.1789113641-gcd8b8a",
-      "observed_amp_sha256": "b85abf99057ee68be28be6867d2032611d303a3fa6fddaee1d6c2b2d22234185",
+      "previous_amp_version": "0.0.1789113641-gcd8b8a",
+      "previous_amp_sha256": "b85abf99057ee68be28be6867d2032611d303a3fa6fddaee1d6c2b2d22234185",
+      "previous_official_checksum_matched": true,
+      "observed_amp_version": "0.0.1789171288-gd95a61",
+      "observed_amp_sha256": "f34fc8597be9b1b5e5658ab8ebb29a4f2597242cd1c998ab9b845ab424bc8cf4",
       "official_checksum_matched": true,
       "amp_clone_existing_project": "passed_user_skills_read_only",
       "clone_origin_shape": "https://ampcode.com/git/@<owner>/-/skills",
@@ -31,7 +34,8 @@
       "credential_environment_allowlist": ["HOME", "PATH", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_TERMINAL_PROMPT"],
       "local_runner_thread_identity": "qualified_authenticated_context",
       "local_runner_owner_email_capability": "qualified_interface_no_email_sent",
-      "ordinary_update_state": "pending_no_authoritative_prior_executable_identity",
+      "ordinary_update_state": "passed_updater_correlated_deleted_prior_inode_replacement",
+      "ordinary_update_regression": "passed_path_helper_clone_read_only_git_and_runner_interfaces",
       "persisted_secret": false
     },
     {

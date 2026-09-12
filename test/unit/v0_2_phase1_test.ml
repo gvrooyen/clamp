@@ -668,19 +668,25 @@ let target_and_environment_fixtures () =
       auth
   in
   Alcotest.(check string) "Linux aggregate state"
-    "candidate_pending_ordinary_update" (string "state" linux_auth);
+    "qualified_ordinary_update" (string "state" linux_auth);
   Alcotest.(check string) "Linux read-only clone qualification"
     "passed_user_skills_read_only"
     (string "amp_clone_existing_project" linux_auth);
   Alcotest.(check string) "Linux Amp minimum"
     "0.0.1789113641-gcd8b8a"
     (string "minimum_supported_amp_version" linux_auth);
-  Alcotest.(check string) "Linux observed Amp version"
-    "0.0.1789113641-gcd8b8a" (string "observed_amp_version" linux_auth);
-  Alcotest.(check string) "Linux observed Amp digest"
-    "b85abf99057ee68be28be6867d2032611d303a3fa6fddaee1d6c2b2d22234185"
-    (string "observed_amp_sha256" linux_auth);
-  Alcotest.(check bool) "Linux official checksum matched" true
+  Alcotest.(check (list string)) "Linux ordinary update identities"
+    [ "0.0.1789113641-gcd8b8a";
+      "b85abf99057ee68be28be6867d2032611d303a3fa6fddaee1d6c2b2d22234185";
+      "0.0.1789171288-gd95a61";
+      "f34fc8597be9b1b5e5658ab8ebb29a4f2597242cd1c998ab9b845ab424bc8cf4" ]
+    [ string "previous_amp_version" linux_auth;
+      string "previous_amp_sha256" linux_auth;
+      string "observed_amp_version" linux_auth;
+      string "observed_amp_sha256" linux_auth ];
+  Alcotest.(check bool) "Linux prior checksum matched" true
+    (bool "previous_official_checksum_matched" linux_auth);
+  Alcotest.(check bool) "Linux current checksum matched" true
     (bool "official_checksum_matched" linux_auth);
   Alcotest.(check string) "Linux observed helper"
     "!amp git-credential-helper" (string "clone_effective_helper_shape" linux_auth);
@@ -697,9 +703,12 @@ let target_and_environment_fixtures () =
     [ "HOME"; "PATH"; "GIT_CONFIG_NOSYSTEM"; "GIT_CONFIG_GLOBAL";
       "GIT_TERMINAL_PROMPT" ]
     (member "credential_environment_allowlist" linux_auth |> strings);
-  Alcotest.(check string) "Linux ordinary update remains pending"
-    "pending_no_authoritative_prior_executable_identity"
+  Alcotest.(check string) "Linux ordinary update passed"
+    "passed_updater_correlated_deleted_prior_inode_replacement"
     (string "ordinary_update_state" linux_auth);
+  Alcotest.(check string) "Linux post-update regression passed"
+    "passed_path_helper_clone_read_only_git_and_runner_interfaces"
+    (string "ordinary_update_regression" linux_auth);
   let mac_auth =
     List.find (fun value -> string "name" value = "local_macos_arm64") auth
   in
@@ -769,14 +778,29 @@ let target_and_environment_fixtures () =
   Alcotest.(check (list string)) "macOS APFS qualification"
     [ "local writable case-insensitive APFS" ]
     (member "filesystems" mac |> strings);
+  let mac_bootstrap = member "bootstrap" mac |> strings in
   Alcotest.(check (list string)) "macOS consumer bootstrap closure"
     [ "bash>=3.2.57-without-mapfile-or-associative-arrays";
       "git>=2.50.1-Apple-Git-155"; "curl>=8.7.1";
       "python3>=3.9.6-strict-json-wrapper";
       "bsdtar>=3.5.3-libarchive>=3.7.4"; "shasum>=6.02";
       "rg>=14.1.1" ]
-    (member "bootstrap" mac |> strings);
-  let contracts = fixture "contracts.json" |> member "contracts" |> records in
+    mac_bootstrap;
+  let contract_fixture = fixture "contracts.json" in
+  let prerequisite_values =
+    member "payload_shapes" contract_fixture |> member "prerequisite" |> records
+    |> List.find (fun field -> string "name" field = "prerequisite")
+    |> member "values" |> strings
+  in
+  let mac_checksum_requirement =
+    List.find (fun value -> contains value "shasum>=") mac_bootstrap
+  in
+  let mac_checksum_name =
+    String.sub mac_checksum_requirement 0 (String.index mac_checksum_requirement '>')
+  in
+  Alcotest.(check bool) "macOS checksum prerequisite is representable" true
+    (List.mem mac_checksum_name prerequisite_values);
+  let contracts = member "contracts" contract_fixture |> records in
   let codes = contract_codes contracts in
   let cases =
     (member "local_configuration_cases" environment_fixture |> records)

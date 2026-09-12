@@ -3,12 +3,12 @@
 ## Status
 
 Clamp v1 and Phases 0–9 are implemented. Version 0.1.4 is the latest published
-production release. Release 0.2.0 Phase 1 contract work is in progress; no
-0.2.0 local-machine behavior is implemented or supported yet. The blocking v1
-product and architecture decisions are resolved; retrieval coefficients remain
-tunable operational defaults rather than product invariants. Repository-owned
-acceptance is local-only; production deployment and release-tag publication
-remain operator-controlled.
+production release. Release 0.2.0 Phase 1 contract work is complete; no 0.2.0
+local-machine behavior is implemented or supported yet. The blocking v1 product
+and architecture decisions are resolved; retrieval coefficients remain tunable
+operational defaults rather than product invariants. Repository-owned acceptance
+is local-only; production deployment and release-tag publication remain
+operator-controlled.
 
 ## Product summary
 
@@ -174,7 +174,7 @@ The target matrix is gated rather than inferred from Amp CLI support:
 
 | Target | 0.2.0 state | Required qualification |
 | --- | --- | --- |
-| Linux x86-64, glibc 2.36 or newer, local ext4 | Candidate | Native non-Orb testing passed ext4 primitives, source-free consumer bootstrap, an exact-project Amp clone with isolated authenticated read-only Git, authenticated local-runner thread/owner-email interfaces, and a private PostgreSQL 15.19/pgvector 0.8.1 harness. Support remains gated on ordinary-update requalification plus later runtime/package, durability, and end-to-end evidence. |
+| Linux x86-64, glibc 2.36 or newer, local ext4 | Candidate | Native non-Orb testing passed ext4 primitives, source-free consumer bootstrap, an exact-project Amp clone with isolated authenticated read-only Git, authenticated local-runner thread/owner-email interfaces, ordinary-update requalification, and a private PostgreSQL 15.19/pgvector 0.8.1 harness. Later runtime/package, durability, and end-to-end evidence remain release gates. |
 | Apple-silicon macOS 26.5.2 or newer | Candidate | Native macOS 26.5.2 arm64 testing passed local writable case-insensitive APFS primitives, source-free consumer bootstrap, an exact-project Amp clone with isolated authenticated read-only Git, authenticated local-runner thread/owner-email interfaces, ordinary-update requalification, and a private PostgreSQL 15.19/pgvector 0.8.1 harness. No support is inferred for older macOS; later native runtime/package, signing, durability, and end-to-end evidence remain release gates. |
 
 Every other architecture, operating system, Linux libc, and filesystem is
@@ -217,8 +217,15 @@ replacement of the recorded prior executable, official checksums for both
 identities, and successful repetition of retained-path, helper, clone, read-only
 Git, and runner-interface checks. Qualification accepts this contextual owner
 attestation together with updater-correlated local evidence; the log did not
-independently distinguish automatic from manual updater invocation. Linux
-ordinary-update behavior remains pending.
+independently distinguish automatic from manual updater invocation.
+
+Linux ordinary-update behavior is qualified by updater records spanning four
+version transitions, official checksums for the recorded endpoint identities,
+and a retained updater process descriptor for the deleted prior inode whose
+bytes exactly matched the prior digest. The new executable passed retained-path,
+helper, clone, read-only Git, and runner-interface checks. Hourly same-process
+events strongly support background initiation, but the logs contain no explicit
+automatic/manual trigger field, so no stronger trigger claim is made.
 
 The authenticated Linux and Mac runner contexts supplied exact current-thread
 ID/URL, current-user identity, and Amp's owner-bound `send_email` capability.
