@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+bridge_root="$repo_root/integrations/telegram-bridge"
+version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$bridge_root/package.json")"
+tag="telegram-bridge-v$version"
+archive_name="clamp-telegram-bridge-$version.tar.gz"
+archive="$repo_root/dist/$archive_name"
+checksum="$archive.sha256"
+stage_root="$repo_root/_build/telegram-bridge-release"
+stage="$stage_root/clamp-telegram-bridge-$version"
+files=(
+  .dockerignore
+  Dockerfile
+  README.md
+  fly.example.toml
+  package-lock.json
+  package.json
+  src/amp.ts
+  src/bridge.ts
+  src/config.ts
+  src/domain.ts
+  src/index.ts
+  src/media-store.ts
+  src/queue.ts
+  src/security.ts
+  src/server.ts
+  src/telegram.ts
+  test/bridge.test.ts
+  test/config.test.ts
+  test/server.test.ts
+  tsconfig.json
+)
+
+[[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+  printf 'Invalid Telegram bridge version: %s\n' "$version" >&2
+  exit 1
+}
+
+require_clean_checkout() {
+  [[ -z "$(git -C "$repo_root" status --porcelain)" ]] || {
+    printf 'Telegram bridge release requires a clean checkout.\n' >&2
+    exit 1
+  }
+}
+
+verify_archive() {
+  local revision="$1"
+  python3 - "$archive" "$checksum" "$version" "$revision" "${files[@]}" <<'PY'
+import gzip
+import hashlib
+from pathlib import Path
+import re
+import sys
+import tarfile
+
+archive_name, checksum_name, version, revision, *source_files = sys.argv[1:]
+archive = Path(archive_name)
+checksum = Path(checksum_name)
+root = f"clamp-telegram-bridge-{version}"
+expected = set(source_files) | {"LICENSE", "REVISION", "VERSION"}
+
+if not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version):
+    raise SystemExit("invalid archive version")
+if not re.fullmatch(r"[0-9a-f]{40}", revision):
+    raise SystemExit("invalid archive revision")
+if not archive.is_file() or archive.is_symlink() or not 0 < archive.stat().st_size <= 16 * 1024 * 1024:
+    raise SystemExit("missing or oversized bridge archive")
+raw = archive.read_bytes()
+if raw[:2] != b"\x1f\x8b" or raw[4:8] != b"\0\0\0\0":
+    raise SystemExit("archive gzip header is not deterministic")
+
+files = {}
+seen = set()
+with tarfile.open(archive, "r:gz") as bundle:
+    for member in bundle.getmembers():
+        name = member.name.rstrip("/")
+        if name in seen:
+            raise SystemExit("duplicate archive entry")
+        seen.add(name)
+        parts = name.split("/")
+        if not parts or parts[0] != root or any(
+            not re.fullmatch(r"[A-Za-z0-9._-]+", part) for part in parts
+        ):
+            raise SystemExit("unsafe archive path")
+        if member.uid != 0 or member.gid != 0 or member.uname or member.gname:
+            raise SystemExit("nondeterministic archive ownership")
+        if member.isdir():
+            if member.mode != 0o755:
+                raise SystemExit("invalid directory mode")
+            continue
+        if not member.isfile() or member.issym() or member.islnk() or member.mode != 0o644:
+            raise SystemExit("unsafe archive entry")
+        relative = name[len(root) + 1:]
+        extracted = bundle.extractfile(member)
+        if extracted is None:
+            raise SystemExit("unreadable archive entry")
+        files[relative] = extracted.read()
+
+if set(files) != expected:
+    raise SystemExit("bridge archive inventory mismatch")
+if files["VERSION"] != f"{version}\n".encode() or files["REVISION"] != f"{revision}\n".encode():
+    raise SystemExit("bridge archive marker mismatch")
+digest = hashlib.sha256(raw).hexdigest()
+expected_checksum = f"{digest}  {archive.name}\n".encode("ascii")
+if not checksum.is_file() or checksum.is_symlink() or checksum.read_bytes() != expected_checksum:
+    raise SystemExit("bridge archive checksum mismatch")
+print(f"{digest}  {archive.name}")
+PY
+}
+
+build() {
+  require_clean_checkout
+  local revision epoch relative source destination
+  revision="$(git -C "$repo_root" rev-parse HEAD)"
+  epoch="$(git -C "$repo_root" log -1 --format=%ct)"
+  [[ "$revision" =~ ^[0-9a-f]{40}$ && "$epoch" =~ ^[0-9]+$ ]]
+
+  (cd "$bridge_root" && npm ci && npm test && npm audit --omit=dev)
+
+  rm -rf -- "$stage"
+  mkdir -p "$stage" "$repo_root/dist"
+  for relative in "${files[@]}"; do
+    source="$bridge_root/$relative"
+    destination="$stage/$relative"
+    [[ -f "$source" && ! -L "$source" ]]
+    mkdir -p "$(dirname "$destination")"
+    install -m 0644 "$source" "$destination"
+  done
+  install -m 0644 "$repo_root/LICENSE" "$stage/LICENSE"
+  printf '%s\n' "$revision" >"$stage/REVISION"
+  printf '%s\n' "$version" >"$stage/VERSION"
+  find "$stage" -type d -exec chmod 0755 {} +
+  find "$stage" -type f -exec chmod 0644 {} +
+
+  rm -f -- "$archive" "$checksum"
+  tar --sort=name --format=posix \
+    --pax-option=delete=atime,delete=ctime \
+    --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \
+    -C "$stage_root" -cf - "$(basename "$stage")" \
+    | gzip -n -9 >"$archive"
+  (cd "$repo_root/dist" && sha256sum "$archive_name" >"$archive_name.sha256")
+  verify_archive "$revision"
+}
+
+publish() {
+  require_clean_checkout
+  local head remote_main remote_tag
+  head="$(git -C "$repo_root" rev-parse HEAD)"
+  remote_main="$(git -C "$repo_root" ls-remote --exit-code origin refs/heads/main | awk 'NR == 1 { print $1 }')"
+  remote_tag="$(git -C "$repo_root" ls-remote --exit-code origin "refs/tags/$tag^{}" | awk 'NR == 1 { print $1 }')"
+  [[ "$head" == "$(git -C "$repo_root" rev-list -n1 "$tag")" ]]
+  [[ "$head" == "$remote_main" && "$head" == "$remote_tag" ]]
+  verify_archive "$head" >/dev/null
+  if gh release view "$tag" --repo gvrooyen/clamp >/dev/null 2>&1; then
+    printf 'GitHub release %s already exists.\n' "$tag" >&2
+    exit 1
+  fi
+  gh release create "$tag" "$archive" "$checksum" \
+    --repo gvrooyen/clamp --verify-tag --latest=false \
+    --title "Clamp Telegram bridge $version" \
+    --notes "Initial bridge-only release. This release contains no native kb runtime artifacts. See the bundled README.md for verified Fly.io deployment and Amp project configuration."
+}
+
+case "${1:-}" in
+  build) build ;;
+  verify)
+    require_clean_checkout
+    verify_archive "$(git -C "$repo_root" rev-parse HEAD)"
+    ;;
+  publish) publish ;;
+  *)
+    printf 'usage: release/telegram-bridge build|verify|publish\n' >&2
+    exit 2
+    ;;
+esac

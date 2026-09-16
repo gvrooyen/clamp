@@ -113,6 +113,24 @@ checks that:
 Only after those checks does it create the corresponding GitHub release and
 upload the archive and checksum. Never force-push a release tag or branch.
 
+## Telegram bridge releases
+
+The optional Telegram bridge has an independent
+`telegram-bridge-vX.Y.Z` release track. It does not change `dune-project`, tag a
+native Clamp version, or publish `kb` runtime archives. From a clean checkout,
+`release/telegram-bridge build` runs the bridge's credential-free tests and
+audit, then creates a deterministic source archive and adjacent SHA-256 under
+`dist/`. Repeating the build for the same commit must reproduce the checksum.
+
+After review, create and push the exact bridge tag without force.
+`release/telegram-bridge publish` requires that clean local `HEAD`, remote
+`main`, and the peeled remote bridge tag all identify the same commit. It
+revalidates the exact bridge-only archive inventory, ownership, modes, version,
+revision, deterministic gzip header, and checksum before creating a GitHub
+release that is explicitly not marked as the repository's latest native
+release. See the [bridge guide](../integrations/telegram-bridge/README.md) for
+artifact consumption and deployment configuration.
+
 The Linux builder and future native macOS builder produce target archives
 first. `release/manifest` then validates their markers, checksums, bounds, and
 byte-identical repository templates before writing one deterministic manifest.

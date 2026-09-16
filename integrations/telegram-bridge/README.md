@@ -77,16 +77,52 @@ The lockfile pins all npm packages. The multi-stage Dockerfile pins its Debian
 Node base image by digest, installs the Amp CLI required by `@ampcode/sdk`, and
 runs as the unprivileged `node` user.
 
+## Release artifact
+
+Bridge releases use their own `telegram-bridge-vX.Y.Z` tags. They do not change
+the native `kb` version or publish native runtime assets. Download and verify
+the release before building or deploying it:
+
+```bash
+version=0.1.0
+base="https://github.com/gvrooyen/clamp/releases/download/telegram-bridge-v${version}"
+archive="clamp-telegram-bridge-${version}.tar.gz"
+curl -fLO "$base/$archive"
+curl -fLO "$base/$archive.sha256"
+sha256sum --check "$archive.sha256"
+tar -xzf "$archive"
+cd "clamp-telegram-bridge-${version}"
+npm ci
+npm test
+docker build -t "clamp-telegram-bridge:${version}" .
+```
+
+The archive contains exact `VERSION` and `REVISION` markers, bridge source and
+tests, the pinned npm lockfile, Dockerfile, Fly example, documentation, and
+license. It contains no native `kb` executable or runtime package.
+
+From a clean checkout of the tagged revision, maintainers can reproduce it:
+
+```bash
+release/telegram-bridge build
+release/telegram-bridge verify
+```
+
+The build uses the commit timestamp, sorted paths, fixed ownership and modes,
+and a zero gzip timestamp. Building the same commit twice must produce the same
+SHA-256. `release/telegram-bridge publish` additionally requires local `HEAD`,
+remote `main`, and the existing remote bridge tag to identify the same commit.
+
 ## Fly.io reference deployment
 
 No command in this guide should be run until the owner has approved creating or
 changing the external Fly app, secrets, and Telegram webhook.
 
-1. Check out the intended Clamp release or commit. Work in this directory and
-   create app-specific configuration without committing it:
+1. Download and verify the intended bridge release as above. Work in its
+   extracted directory and create app-specific configuration without
+   committing it:
 
    ```bash
-   cd integrations/telegram-bridge
    cp fly.example.toml fly.toml
    fly launch --no-deploy
    ```
