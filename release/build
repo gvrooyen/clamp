@@ -38,6 +38,7 @@ install -m 0755 _build/default/bin/kb.exe "$stage/bin/kb"
 strip --strip-unneeded "$stage/bin/kb"
 install -m 0644 db/migrations/*.sql "$stage/share/clamp/migrations/"
 install -m 0755 runtime/templates/setup runtime/templates/resume \
+  runtime/templates/setup-local runtime/templates/kb \
   "$stage/share/clamp/templates/"
 install -m 0644 runtime/templates/skill.md runtime/templates/AGENTS.md \
   runtime/templates/README.md runtime/templates/gitignore \

@@ -49,6 +49,11 @@ val rename_exchange_checked :
   validate:(unit -> bool) -> Unix.file_descr -> string -> Unix.file_descr -> string -> unit
 val unlink_at : Unix.file_descr -> string -> unit
 val rmdir_at : Unix.file_descr -> string -> unit
+val remove_file_at :
+  validate:(unit -> bool) -> Unix.file_descr -> string -> Unix.file_descr ->
+  identity -> unit
+(** Remove one retained regular entry only if its name still resolves to the
+    recorded identity. The parent is synchronized before success. *)
 val inspect : Unix.file_descr -> string -> kind * identity
 val descriptor_identity : Unix.file_descr -> identity
 val descriptor_link_count : Unix.file_descr -> int
@@ -93,6 +98,14 @@ val tree_matches : Unix.file_descr -> tree_snapshot -> bool
     after every destructive/durability boundary. Foreign replacements are
     preserved and reported through an exception. *)
 val remove_tree_at :
+  validate:(unit -> bool) -> Unix.file_descr -> string -> Unix.file_descr ->
+  identity -> unit
+
+(** Remove a retained directory that the caller has already atomically moved
+    into an operation-private, durably discoverable quarantine name. Unlike
+    [remove_tree_at], this does not rename the root again, so interrupted
+    cleanup remains discoverable at [name] for recovery. *)
+val remove_quarantined_tree_at :
   validate:(unit -> bool) -> Unix.file_descr -> string -> Unix.file_descr ->
   identity -> unit
 

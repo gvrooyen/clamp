@@ -18,8 +18,24 @@ if [[ ! -f "$runtime_metadata" || -L "$runtime_metadata" ]] \
   exit 1
 fi
 cli_revision="${runtime_lock_lines[2]}"
-expected_cli="$HOME/.local/share/clamp/kb/$cli_revision/bin/kb"
+runtime_kind="${runtime_lock_lines[0]}"
+if [[ "$runtime_kind" == v2 ]]; then
+  manifest_sha256="${runtime_lock_lines[4]}"
+  manifest_cache="$HOME/.local/share/clamp/kb/manifests/${manifest_sha256}.json"
+  if ! mapfile -t runtime_target_lines < <(
+       python3 "$runtime_metadata" manifest "$manifest_cache" \
+         "${runtime_lock_lines[1]}" "$cli_revision" linux-x86_64 \
+         "$manifest_sha256"
+     ) || (( ${#runtime_target_lines[@]} <= 4 )); then
+    echo '[clamp resume] verified runtime metadata is unavailable; rerun .agents/setup' >&2
+    exit 1
+  fi
+  expected_cli="$HOME/.local/share/clamp/kb/runtimes/linux-x86_64/${runtime_target_lines[1]}/bin/kb"
+else
+  expected_cli="$HOME/.local/share/clamp/kb/$cli_revision/bin/kb"
+fi
 installed_marker="$HOME/.local/share/clamp/kb/$cli_revision/REVISION"
+if [[ "$runtime_kind" == v2 ]]; then installed_marker="${expected_cli%/bin/kb}/REVISION"; fi
 selected_cli="$(command -v kb 2>/dev/null || true)"
 
 if [[ ! -x "$expected_cli" || ! -f "$installed_marker" \
@@ -31,6 +47,7 @@ if [[ ! -x "$expected_cli" || ! -f "$installed_marker" \
 fi
 
 echo "[clamp resume] public kb ${cli_revision} is active at ${selected_cli}"
+if [[ "$runtime_kind" == v2 ]]; then "$repo_root/.agents/kb" --version >/dev/null; fi
 
 if ! command -v pg_ctlcluster >/dev/null 2>&1 \
    || ! command -v pg_conftool >/dev/null 2>&1; then

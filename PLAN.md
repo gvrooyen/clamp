@@ -14,9 +14,10 @@ implementation changes behavior, update the PRD deliberately with the settled
 0.2.0 contract and extend acceptance traceability without weakening any v1
 criterion.
 
-Only planning is in scope for this change. No implementation, template,
-documentation, version, migration, or release change is authorized by this
-plan alone.
+This plan now tracks implementation status as well as the remaining gates. A
+phase marked complete means its repository-owned implementation and named
+platform checks passed; it does not authorize a release, deployment, production
+operation, or a later phase's external end-to-end workflow.
 
 ## Outcome
 
@@ -350,6 +351,16 @@ gates, not Phase 3 implementation work.
   green.
 
 ## Phase 4: Portable private-repository scaffold and migration
+
+**Status: complete.** The portable launcher and consumer instructions, bounded
+local runtime setup, shared v2 archive verification, and exact-0.1.4 recoverable
+scaffold migration are implemented. Linux verification passed the 23-case
+scaffold suite and affected initializer/upgrade/runtime-metadata checks. Native
+macOS 26.5.2 arm64 verification passed 174 unit cases, the same focused counts
+under umasks 022 and 077, and byte-reproducible packaging. Oracle's final review
+is green. This is fixture/syscall evidence, not physical power-loss
+qualification; authenticated local enrollment, real-clone cross-executor
+workflows, signing/notarization, and release publication remain later gates.
 
 ### Deliverables
 

@@ -12,8 +12,11 @@ runtime_url=''
 runtime_sha256=''
 runtime_archive_root=''
 runtime_archive_size=67108864
+runtime_manifest_sha256=''
+runtime_lock_kind=''
 cli_install_dir=''
 runtime_migrations=''
+runtime_required_files=()
 postgres_major=15
 pgvector_version=0.8.1
 pgvector_sha256=a9094dfb85ccdde3cbb295f1086d4c71a20db1d26bf1d6c39f07a7d164033eb4
@@ -49,11 +52,13 @@ load_runtime_lock() {
   fi
   runtime_version="${fields[1]}"
   cli_revision="${fields[2]}"
+  runtime_lock_kind="${fields[0]}"
   if [[ "${fields[0]}" == v1 ]]; then
     runtime_url="${fields[3]}"
     runtime_sha256="${fields[4]}"
     runtime_archive_root="clamp-${runtime_version}-linux-x86_64"
   elif [[ "${fields[0]}" == v2 ]]; then
+    runtime_manifest_sha256="${fields[4]}"
     manifest="$(mktemp)"
     trap 'rm -f -- "${manifest:-}"' RETURN
     curl --fail --silent --show-error --location --proto '=https' \
@@ -61,7 +66,7 @@ load_runtime_lock() {
       --max-time 30 --max-filesize 1048576 "${fields[3]}" --output "$manifest"
     if ! mapfile -t fields < <(python3 "$runtime_metadata" manifest "$manifest" \
          "$runtime_version" "$cli_revision" linux-x86_64 "${fields[4]}") \
-       || (( ${#fields[@]} != 4 )); then
+       || (( ${#fields[@]} <= 4 )); then
       printf '[clamp setup] invalid runtime manifest\n' >&2
       return 1
     fi
@@ -69,12 +74,23 @@ load_runtime_lock() {
     runtime_sha256="${fields[1]}"
     runtime_archive_root="${fields[2]}"
     runtime_archive_size="${fields[3]}"
+    runtime_required_files=("${fields[@]:4}")
+    /usr/bin/python3 "$runtime_metadata" private-dirs "$HOME" \
+      "$cli_install_root" "$cli_install_root/manifests" \
+      "$cli_install_root/runtimes" "$cli_install_root/runtimes/linux-x86_64"
+    /usr/bin/python3 "$runtime_metadata" cache "$manifest" \
+      "$cli_install_root/manifests/${runtime_manifest_sha256}.json" \
+      "$runtime_manifest_sha256"
     rm -f -- "$manifest"
     trap - RETURN
   else
     return 1
   fi
-  cli_install_dir="$cli_install_root/$cli_revision"
+  if [[ "$runtime_lock_kind" == v2 ]]; then
+    cli_install_dir="$cli_install_root/runtimes/linux-x86_64/$runtime_sha256"
+  else
+    cli_install_dir="$cli_install_root/$cli_revision"
+  fi
   runtime_migrations="$cli_install_dir/share/clamp/migrations"
 }
 
@@ -128,7 +144,13 @@ install_runtime() {
       --max-filesize "$runtime_archive_size" "$runtime_url" --output "$archive"
     printf '%s  %s\n' "$runtime_sha256" "$archive" | sha256sum --check --status
 
-    python3 - "$archive" "$runtime_version" "$cli_revision" "$runtime_archive_root" <<'PY'
+    if [[ "$runtime_lock_kind" == v2 ]]; then
+      /usr/bin/python3 "$runtime_metadata" extract "$archive" "$temp_dir/extracted" \
+        "$runtime_version" "$cli_revision" "$runtime_archive_root" \
+        "$runtime_archive_size" "${runtime_required_files[@]}"
+      payload="$temp_dir/extracted/$runtime_archive_root"
+    else
+      python3 - "$archive" "$runtime_version" "$cli_revision" "$runtime_archive_root" <<'PY'
 import re, sys, tarfile
 archive, version, revision, root = sys.argv[1:]
 prefix = root + "/"
@@ -138,6 +160,7 @@ required = {
     prefix + "share/clamp/migrations/0001_enable_vector.sql",
     prefix + "share/clamp/migrations/0002_application_schema.sql",
     prefix + "share/clamp/templates/setup", prefix + "share/clamp/templates/resume",
+    prefix + "share/clamp/templates/setup-local", prefix + "share/clamp/templates/kb",
     prefix + "share/clamp/templates/runtime_metadata.py",
     prefix + "share/clamp/templates/skill.md", prefix + "share/clamp/templates/AGENTS.md",
     prefix + "share/clamp/templates/README.md", prefix + "share/clamp/templates/gitignore",
@@ -170,11 +193,16 @@ with tarfile.open(archive, "r:gz") as value:
     if not required.issubset(files) or total > 64 * 1024 * 1024:
         raise SystemExit("unexpected runtime archive contents")
 PY
-    tar --extract --gzip --file "$archive" --directory "$temp_dir" \
-      --no-same-owner --no-same-permissions
-    payload="$temp_dir/$runtime_archive_root"
+      tar --extract --gzip --file "$archive" --directory "$temp_dir" \
+        --no-same-owner --no-same-permissions
+      payload="$temp_dir/$runtime_archive_root"
+    fi
     [[ "$(cat "$payload/REVISION")" == "$cli_revision" ]]
     [[ "$(cat "$payload/VERSION")" == "$runtime_version" ]]
+    if [[ "$runtime_lock_kind" == v2 ]]; then
+      printf '%s\n' "$runtime_sha256" >"$payload/.archive-sha256"
+      chmod 0600 "$payload/.archive-sha256"
+    fi
     "$payload/bin/kb" --version >/dev/null
     "$payload/bin/kb" validate --repo "$repo_root" --json >/dev/null
     chmod -R go-w "$payload"
@@ -187,6 +215,10 @@ PY
   fi
 
   runtime_migrations="$cli_install_dir/share/clamp/migrations"
+  if [[ "$runtime_lock_kind" == v2 ]]; then
+    /usr/bin/python3 "$runtime_metadata" installed "$cli_install_dir" \
+      "$runtime_version" "$cli_revision" "$runtime_sha256"
+  fi
   "$cli_install_dir/bin/kb" validate --repo "$repo_root" --json >/dev/null
   staged_link="$(mktemp "$HOME/.local/bin/.kb.XXXXXXXX")"
   rm -- "$staged_link"
@@ -196,6 +228,9 @@ PY
   hash -r
   selected="$(command -v kb)"
   [[ "$(readlink -f "$selected")" == "$cli_install_dir/bin/kb" ]]
+  if [[ "$runtime_lock_kind" == v2 ]]; then
+    "$repo_root/.agents/kb" --version >/dev/null
+  fi
   log "activated public kb ${cli_revision} at ${selected}"
 }
 

@@ -21,8 +21,8 @@ let runtime_root root =
   let templates = Filename.concat root "share/clamp/templates" in
   let source = Filename.concat source_root "runtime/templates" in
   mkdirs templates;
-  [ "setup"; "resume"; "runtime_metadata.py"; "skill.md"; "AGENTS.md";
-    "README.md"; "gitignore" ]
+  [ "setup"; "resume"; "setup-local"; "kb"; "runtime_metadata.py";
+    "skill.md"; "AGENTS.md"; "README.md"; "gitignore" ]
   |> List.iter (fun name ->
          write (Filename.concat templates name)
            (read (Filename.concat source name)));
@@ -41,6 +41,14 @@ let create root target =
     ~runtime_url:
       "https://github.com/gvrooyen/clamp/releases/download/v0.1.2/clamp-0.1.2-linux-x86_64.tar.gz"
     ~runtime_sha256:(String.make 64 'a') ~runtime_root:root ()
+
+let contains text needle =
+  let length = String.length needle in
+  let rec loop offset =
+    offset + length <= String.length text
+    && (String.sub text offset length = needle || loop (offset + 1))
+  in
+  loop 0
 
 let complete_private_repository () =
   let parent = Filename.temp_file "clamp-init-" "" in
@@ -94,7 +102,20 @@ let complete_private_repository () =
          ^ "revision=0123456789abcdef0123456789abcdef01234567\n"
          ^ "url=https://github.com/gvrooyen/clamp/releases/download/v0.1.2/clamp-0.1.2-linux-x86_64.tar.gz\n"
          ^ "sha256=" ^ String.make 64 'a' ^ "\n")
-        (read (Filename.concat target ".agents/clamp-runtime.lock")))
+        (read (Filename.concat target ".agents/clamp-runtime.lock"));
+      let instructions =
+        [ "AGENTS.md"; "README.md";
+          ".agents/skills/managing-clamp-knowledge/SKILL.md" ]
+        |> List.map (fun path -> read (Filename.concat target path))
+        |> String.concat "\n"
+      in
+      List.iter
+        (fun absent ->
+          Alcotest.(check bool) ("legacy instructions omit " ^ absent) false
+            (contains instructions absent))
+        [ ".agents/kb"; ".agents/setup-local" ];
+      Alcotest.(check bool) "legacy instructions use activated kb" true
+        (contains instructions "`kb"))
 
 let complete_v2_repository () =
   let parent = Filename.temp_file "clamp-init-v2-" "" in

@@ -1,0 +1,109 @@
+#!/bin/bash
+set -euo pipefail
+PATH=/usr/bin:/bin
+export PATH
+
+json=false
+for argument in "$@"; do [[ "$argument" == --json ]] && json=true; done
+
+fail() {
+  local code="$1" details="$2" message="$3" status="${4:-2}"
+  if [[ "$json" == true ]]; then
+    printf '{"ok":false,"code":"%s","message":"%s","details":%s}\n' \
+      "$code" "$message" "$details"
+  else
+    printf '[clamp kb] %s\n' "$message" >&2
+  fi
+  exit "$status"
+}
+
+script_dir="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -P -- "$script_dir/.." && pwd)"
+runtime_lock="$script_dir/clamp-runtime.lock"
+runtime_metadata="$script_dir/runtime_metadata.py"
+
+git_safe() {
+  env -i HOME="$HOME" PATH=/usr/bin:/bin GIT_CONFIG_NOSYSTEM=1 \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 /usr/bin/git "$@"
+}
+
+[[ -x /usr/bin/git && -x /usr/bin/python3 && -x /usr/bin/uname ]] \
+  || fail runtime_lock_v2_invalid '{"cause":"verify"}' \
+       'required system tools are unavailable; rerun .agents/setup-local'
+git_root="$(git_safe -C "$repo_root" rev-parse --path-format=absolute --show-toplevel 2>/dev/null)" \
+  || fail runtime_lock_v2_invalid '{"cause":"not_git_repository"}' \
+       'repository root is not a Git checkout'
+git_root="$(cd -P -- "$git_root" && pwd)"
+[[ "$git_root" == "$repo_root" ]] || fail runtime_lock_v2_invalid \
+  '{"cause":"root_mismatch"}' 'launcher root does not match the Git checkout'
+
+case "$(/usr/bin/uname -s):$(/usr/bin/uname -m)" in
+  Linux:x86_64) target=linux-x86_64 ;;
+  Darwin:arm64) target=macos-arm64 ;;
+  *) fail local_target_unsupported '{"target":"unsupported"}' \
+       'local target is unsupported' ;;
+esac
+
+mapfile_compat() {
+  local line
+  RUNTIME_FIELDS=()
+  while IFS= read -r line; do RUNTIME_FIELDS+=("$line"); done
+}
+
+lock_output="$(/usr/bin/python3 -I "$runtime_metadata" lock "$runtime_lock" "$target" 2>/dev/null)" \
+  || fail runtime_lock_v2_invalid '{"cause":"schema"}' 'runtime lock is invalid'
+mapfile_compat <<<"$lock_output"
+(( ${#RUNTIME_FIELDS[@]} == 5 )) || fail runtime_lock_v2_invalid \
+  '{"cause":"schema"}' 'runtime lock is invalid'
+[[ "${RUNTIME_FIELDS[0]}" == v2 ]] || fail runtime_lock_v2_invalid \
+  '{"cause":"value"}' 'the repository scaffold must be upgraded to a v2 runtime lock'
+version="${RUNTIME_FIELDS[1]}"
+revision="${RUNTIME_FIELDS[2]}"
+manifest_sha256="${RUNTIME_FIELDS[4]}"
+manifest_cache="$HOME/.local/share/clamp/kb/manifests/${manifest_sha256}.json"
+install_base="$HOME/.local/share/clamp/kb"
+/usr/bin/python3 -I "$runtime_metadata" verify-dirs "$HOME" "$install_base" \
+  "$install_base/manifests" "$install_base/runtimes" \
+  "$install_base/runtimes/$target" \
+  || fail local_runtime_installation_unsafe \
+       '{"cause":"permissions","path_kind":"install_root"}' \
+       'runtime installation parents are unsafe; rerun .agents/setup-local'
+
+RUNTIME_FIELDS=()
+manifest_output="$(/usr/bin/python3 -I "$runtime_metadata" manifest "$manifest_cache" \
+  "$version" "$revision" "$target" "$manifest_sha256" 2>/dev/null)" \
+  || fail local_runtime_installation_unsafe \
+       '{"cause":"schema","path_kind":"runtime"}' \
+       'verified runtime metadata is not installed; run .agents/setup-local'
+mapfile_compat <<<"$manifest_output"
+(( ${#RUNTIME_FIELDS[@]} > 4 )) || fail local_runtime_installation_unsafe \
+  '{"cause":"schema","path_kind":"runtime"}' 'verified runtime metadata is invalid'
+archive_sha256="${RUNTIME_FIELDS[1]}"
+runtime_root="${RUNTIME_FIELDS[2]}"
+installation="$HOME/.local/share/clamp/kb/runtimes/$target/$archive_sha256"
+cli="$installation/bin/kb"
+
+/usr/bin/python3 -I "$runtime_metadata" verify-dirs "$HOME" "$installation" \
+  "$installation/bin" || fail local_runtime_installation_unsafe \
+  '{"cause":"permissions","path_kind":"runtime"}' \
+  'selected runtime installation is unsafe; rerun .agents/setup-local'
+
+/usr/bin/python3 -I "$runtime_metadata" installed "$installation" "$version" \
+  "$revision" "$archive_sha256" 2>/dev/null \
+  || fail local_runtime_installation_unsafe \
+       '{"cause":"identity","path_kind":"runtime"}' \
+       'selected runtime installation does not match the repository lock'
+
+for argument in "$@"; do
+  case "$argument" in
+    --repo|--repo=*|--repo-root|--repo-root=*)
+      fail runtime_lock_v2_invalid '{"cause":"value"}' \
+        'the repository launcher owns the explicit --repo argument'
+      ;;
+  esac
+done
+
+if [[ $# -eq 1 && "$1" == --version ]]; then
+  exec "$cli" --version
+fi
+exec "$cli" --repo "$repo_root" "$@"

@@ -1,40 +1,51 @@
 ---
 name: managing-clamp-knowledge
 description: "Manages Clamp knowledge, journals, and tasks through the stable kb JSON interface. Use when searching, retrieving, recording, verifying, deprecating, publishing, or resolving conflicts in the Clamp knowledge base."
-compatibility: "Requires the private Clamp repository at /home/user/workspace/repo, the public kb runtime pinned by .agents/clamp-runtime.lock, Git, and rg. Indexed operations additionally require the configured Amp project secrets."
+compatibility: "Requires a private Clamp checkout, its repository-owned .agents/kb launcher, the target runtime pinned by .agents/clamp-runtime.lock, Git, and rg. Indexed operations additionally require operation-scoped service credentials."
 ---
 
 # Managing Clamp Knowledge
 
-Use `kb --json` as the policy-enforcing interface to Clamp. Every knowledge
-command must explicitly pass `--repo /home/user/workspace/repo`; never rely on
-the current directory to select the private repository. Git `origin/main` in
-that private repository is the only durable knowledge authority; Postgres is a
-derived index, and local Markdown is the non-semantic fallback.
+Use the repository-owned `.agents/kb` launcher as the policy-enforcing
+interface to Clamp. Establish `REPO_ROOT` once with the quoted Git command
+below, then invoke `"$REPO_ROOT/.agents/kb"`; the launcher validates its own
+checkout and passes the absolute repository root to the native CLI as an
+explicit `--repo`. Git `origin/main` in that private repository is the only
+durable knowledge authority; Postgres is a derived index, and local Markdown is
+the non-semantic fallback.
 
 The CLI implementation comes only from the exact target runtime selected by
-`/home/user/workspace/repo/.agents/clamp-runtime.lock`. `.agents/setup`
-verifies the pinned manifest and archive SHA-256 values, safely extracts the
-exact migrations and executable, and atomically activates it. Upgrade the
-private repository CLI only by reviewing and changing the tracked lock and
-manifest, then running setup; never build or install implementation sources in
-the private repository.
+`.agents/clamp-runtime.lock`. `.agents/setup` in an Orb and
+`.agents/setup-local` on a qualified local machine verify the pinned manifest
+and archive SHA-256 values and install outside the checkout. Upgrade the private
+repository CLI only by reviewing and changing the tracked lock and scaffold,
+then running the applicable setup; never build or install implementation
+sources in the private repository.
 
 ## Establish the session safely
 
-1. Work from the Clamp repository root. Confirm `clamp.yaml`, `knowledge/`, and
+1. Establish the retained checkout without evaluating shell text, then confirm
+   the required files:
+
+   ```bash
+   REPO_ROOT="$(/usr/bin/git rev-parse --path-format=absolute --show-toplevel)" || exit
+   test -f "$REPO_ROOT/clamp.yaml" -a -d "$REPO_ROOT/knowledge" -a \
+     -f "$REPO_ROOT/.agents/skills/managing-clamp-knowledge/SKILL.md"
+   ```
+
+   Confirm `clamp.yaml`, `knowledge/`, and
    `.agents/skills/managing-clamp-knowledge/SKILL.md` exist. Do not treat files
    outside `knowledge/` as concepts.
-2. Run `kb --version`, confirm `command -v kb` resolves through
-   `$HOME/.local/bin/kb`, and confirm its versioned installation marker matches
-   `.agents/clamp-runtime.lock`. If `kb` is unavailable or mismatched in a fresh Orb, run
-   `.agents/setup`, then retry. Setup prepares only local tooling and the local
-   `clamp_test` database; it does not authorize a production migration, paid
-   request, publication, or destructive repair.
-3. Run `kb validate --repo /home/user/workspace/repo --json`. Inspect `ok`,
+2. Run `"$REPO_ROOT/.agents/kb" --version`; never select a global `kb`. If the
+   launcher reports an unavailable or mismatched installation, run
+   `.agents/setup` in an Orb or `.agents/setup-local` locally, then retry. Orb
+   setup additionally prepares only the disposable local `clamp_test` database.
+   Neither setup authorizes a production migration, paid request, publication,
+   or destructive repair.
+3. Run `"$REPO_ROOT/.agents/kb" validate --json`. Inspect `ok`,
    `code`, and structured diagnostics; never decide from `message` text. Repair
    `todo_drift` with
-   `kb --repo /home/user/workspace/repo todo --json`, never by editing
+   `"$REPO_ROOT/.agents/kb" todo --json`, never by editing
    `TODO.md`.
 4. Check required secret **presence only**, immediately before the operation
    that needs it. Never print values or connection URLs:
@@ -45,9 +56,11 @@ the private repository.
    done
    ```
 
-   Do not request or use an OpenAI key, OpenRouter BYOK key, Neon account key,
-   or stored recipient address. `AMP_API_KEY` is Amp runtime Git authentication,
-   not Clamp configuration; never inspect or print it.
+   Orb project secrets are not copied to a local process. Locally, service
+   values must be inherited from the user's secret manager. Do not request or
+   use an OpenAI key, OpenRouter BYOK key, Neon account key, or stored recipient
+   address. `AMP_API_KEY` is Amp runtime Git authentication, not Clamp
+   configuration; never inspect or print it.
 5. Obtain the exact current thread ID and direct thread URL from Amp's
    authenticated current-thread context. Do not read them from environment
    variables, files, branch names, prompts, or user-controlled command output.
@@ -58,7 +71,7 @@ the private repository.
 Before the first indexed `search` or `get` in a fresh thread, run:
 
 ```bash
-kb --repo /home/user/workspace/repo sync --json
+"$REPO_ROOT/.agents/kb" sync --json
 ```
 
 Proceed when `ok` is true and `code` is `sync_complete` or
@@ -85,7 +98,7 @@ post-dispatch operations blindly.
 Prefer indexed discovery:
 
 ```bash
-kb --repo /home/user/workspace/repo search "database migration policy" --json
+"$REPO_ROOT/.agents/kb" search "database migration policy" --json
 ```
 
 Require `ok: true` and `code: search_complete`. Read candidates from
@@ -93,9 +106,9 @@ Require `ok: true` and `code: search_complete`. Read candidates from
 confidence. Search returns snippets and metadata and records no access.
 
 For human output, default
-`kb --repo /home/user/workspace/repo search QUERY` is concise and shows only the
+`"$REPO_ROOT/.agents/kb" search QUERY` is concise and shows only the
 top snippet and source.
-`kb --repo /home/user/workspace/repo search QUERY --verbose` shows every returned match and
+`"$REPO_ROOT/.agents/kb" search QUERY --verbose` shows every returned match and
 four-decimal ranking components. `--verbose` does not change `--json`; agents
 should use the complete stable JSON result rather than scraping either human
 format.
@@ -103,7 +116,7 @@ format.
 Retrieve full indexed content only after selecting an ID:
 
 ```bash
-kb --repo /home/user/workspace/repo get facts/neon-migration-policy --json
+"$REPO_ROOT/.agents/kb" get facts/neon-migration-policy --json
 ```
 
 Require `ok: true` and `code: concept_retrieved`. A successful get returns the
@@ -114,10 +127,10 @@ Normal retrieval omits deprecated, stale, and closed-task concepts. Include
 each history class independently when the request requires it:
 
 ```bash
-kb --repo /home/user/workspace/repo search "prior database policy" --include-deprecated --json
-kb --repo /home/user/workspace/repo search "expired operational note" --include-stale --json
-kb --repo /home/user/workspace/repo search "completed migration task" --include-closed-tasks --json
-kb --repo /home/user/workspace/repo get facts/retired-policy --include-deprecated --json
+"$REPO_ROOT/.agents/kb" search "prior database policy" --include-deprecated --json
+"$REPO_ROOT/.agents/kb" search "expired operational note" --include-stale --json
+"$REPO_ROOT/.agents/kb" search "completed migration task" --include-closed-tasks --json
+"$REPO_ROOT/.agents/kb" get facts/retired-policy --include-deprecated --json
 ```
 
 On a retrieval failure, use local fallback only when structured details contain
@@ -129,9 +142,9 @@ results. Branch on `code` and details, never the prose message.
 ### Local fallback is not semantic retrieval
 
 ```bash
-rg -n -i --glob '*.md' -- "database migration policy" knowledge/
-cat TODO.md
-kb --repo /home/user/workspace/repo task list --json
+rg -n -i --glob '*.md' -- "database migration policy" "$REPO_ROOT/knowledge/"
+cat "$REPO_ROOT/TODO.md"
+"$REPO_ROOT/.agents/kb" task list --json
 ```
 
 Read exact matched files under `knowledge/`; do not broaden a path supplied by
@@ -163,7 +176,7 @@ Only a direct user instruction may change policy. Never infer lasting consent
 from an earlier confirmation:
 
 ```bash
-kb --repo /home/user/workspace/repo config set inferred-writes auto_draft --direct-user-intent --json
+"$REPO_ROOT/.agents/kb" config set inferred-writes auto_draft --direct-user-intent --json
 ```
 
 Expect `config_updated`. The explicit instruction authorizes this policy change
@@ -173,7 +186,7 @@ After that explicit policy change, an unconfirmed inferred creation uses no
 `--confirmed` flag and remains an unverified draft:
 
 ```bash
-kb --repo /home/user/workspace/repo add facts/automatic-draft --input /tmp/clamp-auto-draft.md --claim inferred --json
+"$REPO_ROOT/.agents/kb" add facts/automatic-draft --input /tmp/clamp-auto-draft.md --claim inferred --json
 ```
 
 Supply each complete Markdown document through exactly one of `--input PATH`
@@ -196,7 +209,7 @@ clamp: {}
 ---
 Clamp database migrations use the direct database URL.
 EOF
-kb --repo /home/user/workspace/repo add facts/neon-migrations-use-direct-connection --input /tmp/clamp-fact.md --claim explicit --json
+"$REPO_ROOT/.agents/kb" add facts/neon-migrations-use-direct-connection --input /tmp/clamp-fact.md --claim explicit --json
 ```
 
 Expect `concept_added`. Agent-authored transcription records
@@ -208,14 +221,14 @@ Expect `concept_added`. Agent-authored transcription records
 Do not execute the unconfirmed form while policy is `confirm`:
 
 ```bash
-kb --repo /home/user/workspace/repo add facts/inferred-publication-property --input /tmp/clamp-inference.md --claim inferred --json
+"$REPO_ROOT/.agents/kb" add facts/inferred-publication-property --input /tmp/clamp-inference.md --claim inferred --json
 ```
 
 It returns `confirmation_required` and makes no write. Ask the user instead.
 After the user confirms the proposed inference:
 
 ```bash
-kb --repo /home/user/workspace/repo add facts/inferred-publication-property --input /tmp/clamp-inference.md --claim inferred --confirmed --json
+"$REPO_ROOT/.agents/kb" add facts/inferred-publication-property --input /tmp/clamp-inference.md --claim inferred --confirmed --json
 ```
 
 Expect `concept_added`; the assertion remains `amp/agent` and the confirmation
@@ -234,7 +247,7 @@ clamp: {}
 ---
 Reviewed the local publication workflow today.
 EOF
-kb --repo /home/user/workspace/repo add --input /tmp/clamp-journal.md --claim explicit --json
+"$REPO_ROOT/.agents/kb" add --input /tmp/clamp-journal.md --claim explicit --json
 ```
 
 Omit the ID. Clamp selects today's canonical Johannesburg path. Repeating the
@@ -244,20 +257,20 @@ same-day add updates that stable journal concept and still returns
 ### Edit and verification
 
 ```bash
-kb --repo /home/user/workspace/repo edit facts/neon-migrations-use-direct-connection --input /tmp/clamp-fact-revised.md --claim explicit --json
+"$REPO_ROOT/.agents/kb" edit facts/neon-migrations-use-direct-connection --input /tmp/clamp-fact-revised.md --claim explicit --json
 ```
 
 Expect `concept_edited`. Semantic unconfirmed edits clear stale verification;
 formatting-only or link-only edits may preserve it.
 
-`kb --repo /home/user/workspace/repo verify` records
+`"$REPO_ROOT/.agents/kb" verify` records
 `verified.by: human:owner`, so agent review is never
 sufficient authority. Run it only when the authenticated current user directly
 requested verification of this concept or directly confirmed the exact current
 concept content. Then assert that authority explicitly:
 
 ```bash
-kb --repo /home/user/workspace/repo verify facts/neon-migrations-use-direct-connection --verification-authority user-explicit --json
+"$REPO_ROOT/.agents/kb" verify facts/neon-migrations-use-direct-connection --verification-authority user-explicit --json
 ```
 
 Expect `concept_verified`. Without direct user authority, do not run it. The
@@ -265,8 +278,8 @@ production boundary rejects both a missing authority and an agent-only claim,
 without changing the file:
 
 ```bash
-kb --repo /home/user/workspace/repo verify facts/neon-migrations-use-direct-connection --json
-kb --repo /home/user/workspace/repo verify facts/neon-migrations-use-direct-connection --verification-authority agent-reviewed --json
+"$REPO_ROOT/.agents/kb" verify facts/neon-migrations-use-direct-connection --json
+"$REPO_ROOT/.agents/kb" verify facts/neon-migrations-use-direct-connection --verification-authority agent-reviewed --json
 ```
 
 These return `verification_authority_required` and
@@ -276,7 +289,7 @@ confidence into human verification.
 ### Genuine replacement and deprecation
 
 ```bash
-kb --repo /home/user/workspace/repo deprecate facts/old-policy --superseded-by facts/current-policy --claim explicit --json
+"$REPO_ROOT/.agents/kb" deprecate facts/old-policy --superseded-by facts/current-policy --claim explicit --json
 ```
 
 Expect `concept_deprecated`. Keep the old path stable. Use a replacement only
@@ -300,10 +313,10 @@ clamp:
 ---
 Review the focused retrieval checks and record the result.
 EOF
-kb --repo /home/user/workspace/repo task add --input /tmp/clamp-task.md --claim explicit --json
-kb --repo /home/user/workspace/repo task list --json
-kb --repo /home/user/workspace/repo task start <returned-task-id> --json
-kb --repo /home/user/workspace/repo task block <returned-task-id> --json
+"$REPO_ROOT/.agents/kb" task add --input /tmp/clamp-task.md --claim explicit --json
+"$REPO_ROOT/.agents/kb" task list --json
+"$REPO_ROOT/.agents/kb" task start <returned-task-id> --json
+"$REPO_ROOT/.agents/kb" task block <returned-task-id> --json
 ```
 
 Expect `task_added`, `tasks_listed`, `task_started`, and `task_blocked`
@@ -311,24 +324,24 @@ respectively.
 The returned stable task ID already starts with `tasks/`; pass
 `<returned-task-id>` unchanged and never add another namespace. Task mutations
 regenerate `TODO.md`; never edit that generated file directly. Use
-`kb --repo /home/user/workspace/repo todo --json` only to regenerate or repair it.
+`"$REPO_ROOT/.agents/kb" todo --json` only to regenerate or repair it.
 
 Close without another confirmation only when the agent directly performed and
 verified the work, or the user explicitly marked it complete:
 
 ```bash
-kb --repo /home/user/workspace/repo task done <returned-task-id> --closure-authority performed-and-verified --json
-kb --repo /home/user/workspace/repo task done <returned-task-id> --closure-authority user-explicit --json
+"$REPO_ROOT/.agents/kb" task done <returned-task-id> --closure-authority performed-and-verified --json
+"$REPO_ROOT/.agents/kb" task done <returned-task-id> --closure-authority user-explicit --json
 ```
 
 Expect `task_done`.
 Use `--closure-authority confirmed` only after asking in every other case. Use
-`kb --repo /home/user/workspace/repo task cancel ID --json` for cancellation
-and `kb --repo /home/user/workspace/repo task list --history --json` to inspect
+`"$REPO_ROOT/.agents/kb" task cancel ID --json` for cancellation
+and `"$REPO_ROOT/.agents/kb" task list --history --json` to inspect
 done/cancelled tasks.
 
 An inferred task is an inferred write: under `confirm`, ask before
-`kb --repo /home/user/workspace/repo task add ... --claim inferred --confirmed --json`;
+`"$REPO_ROOT/.agents/kb" task add ... --claim inferred --confirmed --json`;
 under explicitly enabled `auto_draft`, an unconfirmed inferred task is a draft.
 
 ## Publish every completed managed mutation
@@ -337,8 +350,8 @@ After the requested concept/config/task mutation is complete and validated,
 publish it with the exact authenticated current thread ID:
 
 ```bash
-kb --repo /home/user/workspace/repo validate --json
-kb --repo /home/user/workspace/repo publish --thread-id <current-thread-id> --json
+"$REPO_ROOT/.agents/kb" validate --json
+"$REPO_ROOT/.agents/kb" publish --thread-id <current-thread-id> --json
 ```
 
 Never substitute an environment variable for `<current-thread-id>`. Never
@@ -351,7 +364,7 @@ Interpret publication codes as follows:
 | Stable code | Agent action |
 | --- | --- |
 | `publish_complete` | Report the durable commit and successful nested sync. |
-| `publish_complete_index_stale` | `details.published` is true: report Git success and stale index; never imply rollback. Run a later `kb --repo /home/user/workspace/repo sync --json`. No email. |
+| `publish_complete_index_stale` | `details.published` is true: report Git success and stale index; never imply rollback. Run a later `"$REPO_ROOT/.agents/kb" sync --json`. No email. |
 | `publish_complete_cleanup_failed` | Git is published but local cleanup is pending. Rerun the same publish command after fixing the local Git problem. No email. |
 | `publish_complete_index_stale_cleanup_pending` | Report both `cause` and `cleanup_cause`, preserve the published SHA, repair cleanup by rerunning the same publish command, and synchronize later. No email. |
 | `publish_race_exhausted` | Report the recovery branch and commit. It is not on main and is not a content conflict. No email. |
@@ -379,7 +392,7 @@ rebase, and rerun the same publish command:
 
 ```bash
 git add -- knowledge/facts/conflicted-concept.md
-kb --repo /home/user/workspace/repo publish --thread-id <current-thread-id> --json
+"$REPO_ROOT/.agents/kb" publish --thread-id <current-thread-id> --json
 ```
 
 Do not choose ours/theirs blindly, fabricate a compromise, or manually resolve
@@ -387,7 +400,7 @@ Do not choose ours/theirs blindly, fabricate a compromise, or manually resolve
 confident, preserve the original commit:
 
 ```bash
-kb --repo /home/user/workspace/repo publish --thread-id <current-thread-id> --preserve-conflict --json
+"$REPO_ROOT/.agents/kb" publish --thread-id <current-thread-id> --preserve-conflict --json
 ```
 
 Do not notify until the response code is `publish_conflict_preserved` or
@@ -397,7 +410,7 @@ failure or an unpreserved `publish_conflict` gets no email. For cleanup pending,
 request the email once, then retry cleanup separately:
 
 ```bash
-kb --repo /home/user/workspace/repo publish --thread-id <current-thread-id> --preserve-conflict --json
+"$REPO_ROOT/.agents/kb" publish --thread-id <current-thread-id> --preserve-conflict --json
 ```
 
 The retry verifies that the recorded remote conflict branch still resolves to
@@ -447,36 +460,14 @@ The `kb` CLI sends no email. Never use owner email for
 `publish_race_exhausted`, authentication/network/provider/database failures,
 stale indexes, main-publication cleanup results, or preservation failures.
 
-## Keep acceptance separate from normal knowledge work
+## Keep development outside this repository
 
-For repository review, the hermetic Phase 9 entry point is:
-
-```bash
-.agents/phase9-acceptance
-```
-
-Stage the exact source candidate first. The runner rejects unstaged tracked and
-non-ignored untracked files, then audits index blobs. It re-executes with an
-empty private HOME, allowlisted variables, fixed tool paths, and disabled psql
-startup files. It creates only a disposable local database and runs the
-repository-owned build, tests, documentation/help/skill drift, bounded leakage,
-and lint checks. Its command plan contains no sync, search, retrieve, publish,
-Neon migration, OpenRouter, or email operation. This isolation does not prove a
-general network sandbox.
-
-The reviewed Phase 7 CLI cross-version evidence is complete against immutable
-reviewed tree `8e02da9ecd6a7445ac450f747e22d2ccd3baaa63`: the isolated Phase 7
-executable passed 20/20 with the cross-version case executed as `[OK]`. The
-normal runner does not include that historical case. Never pass
-`CLAMP_REVIEWED_PHASE7_KB` to this runner or execute an ambient binary path; a
-future repetition must again use only a separately reviewed immutable old CLI
-in its isolated test process. Do not run acceptance as part of an ordinary
-knowledge operation.
-
-The completed clean-room and controlled production evidence is in README.
-Local acceptance still never authorizes or proves a production operation;
-future production migrations, syncs, retrievals, publications, and emails each
-require current owner authority even though Phase 9 and v1 are operational.
+This source-free assistant repository has no development build, test,
+acceptance, or release commands. Do not copy commands or evidence claims from
+the public Clamp implementation repository into a knowledge workflow. Running
+setup, validation, or local Markdown fallback does not prove index freshness or
+authorize a production migration, synchronization, retrieval, publication, or
+email.
 
 ## Stable-result discipline
 

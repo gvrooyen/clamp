@@ -12,6 +12,12 @@ done.
 > Current release: [v0.1.4](https://github.com/gvrooyen/clamp/releases/tag/v0.1.4).
 > Requires x86_64 Linux with glibc 2.36 or newer.
 
+Release 0.2.0 Phase 4 is repository-complete: its portable launcher, local
+runtime installer, exact-0.1.4 scaffold migration, Linux checks, native macOS
+checks, and Oracle review passed. It is not yet a published or supported local
+workflow; trusted local Amp authentication, end-to-end qualification, and
+release/operator gates remain pending.
+
 Native Apple-silicon macOS development builds and unsigned verification
 packages are available from source; they are not a supported production
 release. See [native build requirements and remaining gates](./docs/building.md#native-macos-build-and-disposable-integration).

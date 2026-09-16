@@ -46,8 +46,9 @@ let mandatory_files =
     "bin/kb"; "share/clamp/migrations/0001_enable_vector.sql";
     "share/clamp/migrations/0002_application_schema.sql";
     "share/clamp/templates/AGENTS.md"; "share/clamp/templates/README.md";
-    "share/clamp/templates/gitignore"; "share/clamp/templates/resume";
-    "share/clamp/templates/runtime_metadata.py"; "share/clamp/templates/setup";
+    "share/clamp/templates/gitignore"; "share/clamp/templates/kb";
+    "share/clamp/templates/resume"; "share/clamp/templates/runtime_metadata.py";
+    "share/clamp/templates/setup"; "share/clamp/templates/setup-local";
     "share/clamp/templates/skill.md" ]
 
 let error code message = Error { code; message }

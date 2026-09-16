@@ -11,6 +11,13 @@ Fresh Amp Orbs run `.agents/setup` once and `.agents/resume` after every wake.
 Neither hook performs production synchronization, publication, migration, or
 paid embedding requests.
 
+After `amp clone` on a qualified local machine, run `.agents/setup-local` from
+the checkout. It installs the checksum-pinned runtime outside the repository,
+validates the bundle, and reports only whether required service values are
+present. It does not copy Orb project secrets, edit tracked files, synchronize,
+publish, or run a production database migration. Supply service credentials to
+the local Amp process from your own secret manager.
+
 `kb init` records the durable bootstrap files in a generic initial commit but
 does not configure a remote. Setup recreates empty taxonomy directories because
 Git does not track empty directories.
@@ -18,5 +25,5 @@ Git does not track empty directories.
 Validate locally with:
 
 ```bash
-kb validate --repo /home/user/workspace/repo --json
+.agents/kb validate --json
 ```

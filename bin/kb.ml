@@ -848,6 +848,77 @@ let upgrade =
                Clamp.Cli_result.exit_code result)
       $ selected_version $ latest $ common_options)
 
+let emit_scaffold options = function
+  | Ok (success : Clamp.Scaffold.success) ->
+      let data =
+        if success.code = "scaffold_already_current" then
+          `Assoc [ ("version", `String success.to_version) ]
+        else
+          `Assoc
+            [ ("from_version", `String success.from_version);
+              ("to_version", `String success.to_version);
+              ("changed_paths",
+               `List (List.map (fun path -> `String path) success.changed_paths)) ]
+      in
+      emit
+        ~human:
+          (if success.code = "scaffold_already_current" then
+             Printf.sprintf "Clamp scaffold %s is already current." success.to_version
+           else
+             Printf.sprintf "Clamp scaffold upgraded from %s to %s."
+               success.from_version success.to_version)
+        ~command:"scaffold upgrade" options success.code data
+  | Error (failure : Clamp.Scaffold.error) ->
+      let result =
+        Clamp.Cli_result.failure ~exit_class:failure.exit_class ~code:failure.code
+          ~message:failure.message ~details:failure.details
+      in
+      emit_diagnostic options ~command:"scaffold upgrade"
+        ~exit_class:failure.exit_class;
+      if options.json then print_endline (Clamp.Cli_result.to_json_string result)
+      else if not options.quiet then Printf.eprintf "kb: %s\n" failure.message;
+      Clamp.Cli_result.exit_code result
+
+let scaffold =
+  let runtime_version =
+    Arg.(required & opt (some string) None & info [ "runtime-version" ]
+      ~docv:"X.Y.Z" ~doc:"Target portable scaffold runtime version.")
+  and runtime_revision =
+    Arg.(required & opt (some string) None & info [ "runtime-revision" ]
+      ~docv:"SHA" ~doc:"Target runtime release commit.")
+  and manifest_url =
+    Arg.(required & opt (some string) None & info [ "runtime-manifest-url" ]
+      ~docv:"HTTPS-URL" ~doc:"Fixed public target runtime manifest URL.")
+  and manifest_sha256 =
+    Arg.(required & opt (some string) None & info [ "runtime-manifest-sha256" ]
+      ~docv:"SHA256" ~doc:"Expected target runtime manifest SHA-256.")
+  and runtime_root =
+    Arg.(value & opt (some string) None & info [ "runtime-root" ] ~docv:"PATH"
+      ~doc:"Prepared standalone runtime root. Defaults to the executing package root.")
+  in
+  let upgrade =
+    Cmd.v
+      (command_info "upgrade"
+         "Upgrade an exact supported generated assistant scaffold without publishing it.")
+      Term.
+        (const
+           (fun runtime_version runtime_revision manifest_url manifest_sha256
+                runtime_root options ->
+             let runtime_root =
+               Option.value runtime_root
+                 ~default:
+                   (let executable = Unix.realpath Sys.executable_name in
+                    Filename.dirname (Filename.dirname executable))
+             in
+             Clamp.Scaffold.upgrade ~repo:options.repo_root ~runtime_root
+               ~runtime_version ~runtime_revision ~manifest_url ~manifest_sha256
+             |> emit_scaffold options)
+        $ runtime_version $ runtime_revision $ manifest_url $ manifest_sha256
+        $ runtime_root $ common_options)
+  in
+  Cmd.group (command_info "scaffold" "Manage the generated assistant scaffold.")
+    [ upgrade ]
+
 let command =
   let doc = "Native CLI for the Clamp knowledge base." in
   let commands =
@@ -867,13 +938,15 @@ let command =
       sync;
       publish;
       upgrade;
+      scaffold;
       database;
       config;
     ]
   in
   Cmd.group (command_info "kb" doc) commands
 
-type fallback_selection = Top | Task | Database | Config_set | Config_leaf | Complete
+type fallback_selection =
+  | Top | Task | Database | Config_set | Config_leaf | Scaffold | Complete
 
 type fallback_context = {
   fallback_options : common_options;
@@ -890,7 +963,8 @@ let inspect_fallback_argv argv =
   let repo = ref "." and command = ref "kb" and selection = ref Top in
   let top_commands =
     [ "init"; "add"; "edit"; "verify"; "deprecate"; "todo"; "validate"; "task";
-      "database"; "config"; "search"; "get"; "sync"; "publish"; "upgrade" ]
+      "database"; "config"; "search"; "get"; "sync"; "publish"; "upgrade";
+      "scaffold" ]
   in
   let task_commands = [ "add"; "list"; "start"; "block"; "done"; "cancel" ] in
   let value_options =
@@ -898,7 +972,9 @@ let inspect_fallback_argv argv =
       "--closure-authority"; "--verification-authority"; "--local-database";
       "--migrations-dir"; "--source-repository"; "--runtime-version";
       "--runtime-revision"; "--runtime-url"; "--runtime-sha256";
-      "--runtime-root"; "--release"; "--commit"; "--thread-id"; "--version" ]
+      "--runtime-root"; "--runtime-manifest-url";
+      "--runtime-manifest-sha256"; "--release"; "--commit"; "--thread-id";
+      "--version" ]
   in
   let boolean_options =
     [ "--json"; "--quiet"; "-q"; "--diagnostic"; "--stdin";
@@ -928,6 +1004,7 @@ let inspect_fallback_argv argv =
             if argument = "task" then Task
             else if argument = "database" then Database
             else if argument = "config" then Config_set
+            else if argument = "scaffold" then Scaffold
             else Complete
         end
         else selection := Complete
@@ -946,6 +1023,9 @@ let inspect_fallback_argv argv =
     | Config_leaf ->
         if argument = "inferred-writes" then
           command := "config set inferred-writes";
+        selection := Complete
+    | Scaffold ->
+        if argument = "upgrade" then command := "scaffold upgrade";
         selection := Complete
     | Complete -> ()
   in

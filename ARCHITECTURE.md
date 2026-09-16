@@ -145,9 +145,9 @@ canonical v2 lock with that release's templates. The tracked Python bootstrap
 parser enforces the same metadata acceptance rules before `kb` is available;
 release generation verifies byte-identical templates across target archives.
 
-### Planned 0.2 local execution boundary
+### 0.2 portable repository boundary
 
-The planned 0.2 architecture preserves one native `kb` implementation and one
+The 0.2 architecture preserves one native `kb` implementation and one
 tracked skill across Orbs and qualified local machines. A generated
 repository-owned `.agents/kb` launcher discovers its own retained Git root,
 verifies that repository's v2 runtime lock, selects an immutable installation
@@ -155,28 +155,31 @@ by exact target and archive digest, and invokes the absolute executable with an
 explicit `--repo`. There is no process-global active runtime requirement, so
 two repositories may retain different pins.
 
-`.agents/setup` remains Orb lifecycle code. `.agents/setup-local` performs only
-explicit local preflight, verified runtime installation, enrollment, and
-validation; it neither adapts tracked files nor runs Orb PostgreSQL setup.
-Machine-local Amp enrollment lives outside the checkout in an effective-user-
-private XDG state tree and contains no secret. Local Git operations retain the
-existing `Sync`/`Publication` ownership boundary: only a revalidated official
-Amp helper receives a minimal credential environment for an exact Amp-hosted
-origin, while all Git safety, preservation, retry, and exact-SHA indexing rules
-remain shared.
+.agents/setup` remains Orb lifecycle code. `.agents/setup-local` now performs
+only explicit local preflight, immutable checksum-verified runtime installation,
+launcher verification, and bundle validation; it neither adapts tracked files
+nor runs Orb PostgreSQL setup. Trusted machine-local Amp enrollment and helper
+execution remain the next boundary. They will live outside the checkout in an
+effective-user-private XDG state tree and contain no secret. Local Git
+operations continue to retain the existing `Sync`/`Publication` ownership
+boundary.
 
-Scaffold migration is a distinct `Initializer`/upgrade responsibility. It
-recognizes exact generated identities, updates the scaffold and lock as one
-recoverable repository operation, and never publishes or replaces `.git`.
+`Scaffold` owns migration independently of `Initializer`. It recognizes the
+frozen exact 0.1.4 generated identities, retains and validates the complete
+managed parent chain, and updates scaffold files plus the lock through one
+root-locked recoverable transaction. Durable transaction records distinguish
+rollback, committed cleanup, interruption, and foreign replacement. The
+operation never publishes, replaces `.git`, or edits owner knowledge/configuration.
 Runtime-manifest parsing, target detection, local enrollment, and platform
 filesystem primitives must remain independently testable boundaries rather
 than shell overrides around Linux behavior.
 
-The portable runtime metadata and native Linux/macOS runtime-package boundaries
-are implemented toward 0.2. The repository launcher, local setup, enrollment,
-and scaffold migration described above remain later-phase work. The target
-qualification record is in [Phase 1](./docs/local-clone-phase1.md), with native
-runtime evidence in [Phase 3](./docs/macos-phase3.md).
+Portable runtime metadata, native Linux/macOS runtime packaging, the repository
+launcher, local runtime setup, generated consumer scaffold, and scaffold
+migration are implemented toward 0.2. Machine-local Amp enrollment and trusted
+local Git authentication remain later-phase work. The target qualification
+record is in [Phase 1](./docs/local-clone-phase1.md), with native runtime
+evidence in [Phase 3](./docs/macos-phase3.md).
 
 ## Embeddings and synchronization
 

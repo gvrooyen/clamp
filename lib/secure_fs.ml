@@ -274,6 +274,50 @@ let rec remove_tree_at ~validate parent name retained expected_identity =
             && descriptor_link_count retained = max 0 (links - 1))
       then raise Rename_validation_failed
 
+let remove_quarantined_tree_at ~validate parent name retained expected_identity =
+  let kind, observed = inspect parent name in
+  if kind <> Directory || not (same_entry observed expected_identity)
+     || not (validate ())
+     || not (entry_matches parent name Directory expected_identity retained)
+  then raise Rename_validation_failed;
+  chmod_descriptor retained 0o700;
+  fsync retained;
+  let entries = ref [] in
+  iter_entries retained (fun child -> entries := child :: !entries);
+  let guard () =
+    validate ()
+    && entry_matches parent name Directory expected_identity retained
+  in
+  List.sort String.compare !entries
+  |> List.iter (fun child ->
+         let _, identity = inspect retained child in
+         let descriptor = open_path_at retained child in
+         Fun.protect ~finally:(fun () -> Unix.close descriptor) (fun () ->
+             remove_tree_at ~validate:guard retained child descriptor identity));
+  if not (guard ()) then raise Rename_validation_failed;
+  let watch = watch_directory_removal retained in
+  Fun.protect ~finally:(fun () -> close_directory_removal watch) (fun () ->
+      rmdir_at parent name;
+      fsync parent;
+      if not
+           (validate () && entry_absent parent name
+            && directory_removal_observed watch)
+      then raise Rename_validation_failed)
+
+let remove_file_at ~validate parent name retained expected_identity =
+  let kind, observed = inspect parent name in
+  if kind <> Regular || not (same_entry observed expected_identity)
+     || not (validate ())
+     || not (entry_matches parent name Regular expected_identity retained)
+  then raise Rename_validation_failed;
+  let links = descriptor_link_count retained in
+  unlink_at parent name;
+  fsync parent;
+  if not
+       (validate () && entry_absent parent name
+        && descriptor_link_count retained = max 0 (links - 1))
+  then raise Rename_validation_failed
+
 type tree_snapshot = {
   tree_identity : identity;
   tree_entries : (string * kind * identity * tree_snapshot option) list;

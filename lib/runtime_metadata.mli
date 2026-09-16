@@ -38,6 +38,7 @@ val maximum_extracted_bytes : int64
 val maximum_targets : int
 val accepted_targets : string list
 val mandatory_files : string list
+val valid_relative_path : string -> bool
 val valid_version : string -> bool
 val valid_revision : string -> bool
 val valid_sha256 : string -> bool

@@ -100,6 +100,13 @@
  (libraries clamp alcotest unix))
 
 (test
+ (name scaffold_test)
+ (modules scaffold_test)
+ (deps
+  (source_tree ../../runtime/templates))
+ (libraries clamp alcotest digestif unix yojson))
+
+(test
  (name v0_2_phase1_test)
  (modules v0_2_phase1_test)
  (deps

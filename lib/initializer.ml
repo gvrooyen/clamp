@@ -128,6 +128,26 @@ let runtime_root = function
 let template root relative =
   read_regular (Filename.concat root ("share/clamp/templates/" ^ relative))
 
+let replace_literal pattern replacement value =
+  Str.global_replace (Str.regexp_string pattern) replacement value
+
+let legacy_template_contents name contents =
+  let contents =
+    contents
+    |> replace_literal "\"$REPO_ROOT/.agents/kb\"" "kb"
+    |> replace_literal ".agents/kb" "kb"
+    |> replace_literal ".agents/setup-local" ".agents/setup"
+    |> replace_literal "repository-owned `kb` launcher"
+         "setup-activated `kb` executable"
+    |> replace_literal "repository-owned `kb`" "setup-activated `kb`"
+  in
+  if name = "README.md" then
+    replace_literal
+      "After `amp clone` on a qualified local machine, run `.agents/setup` from\nthe checkout. It installs the checksum-pinned runtime outside the repository,\nvalidates the bundle, and reports only whether required service values are\npresent. It does not copy Orb project secrets, edit tracked files, synchronize,\npublish, or run a production database migration. Supply service credentials to\nthe local Amp process from your own secret manager.\n"
+      "This legacy scaffold is Orb-only. Run `kb scaffold upgrade` from a\nseparately verified 0.2 runtime before attempting local setup.\n"
+      contents
+  else contents
+
 let git_environment =
     [| "GIT_CONFIG_NOSYSTEM=1"; "GIT_CONFIG_GLOBAL=/dev/null";
        "HOME=/nonexistent"; "XDG_CONFIG_HOME=/nonexistent";
@@ -216,22 +236,47 @@ let create_internal ~target ~source_repository ~runtime_version ~runtime_revisio
       error "init_target_exists" "The initialization target already exists."
     else
       let root = runtime_root root in
-      let templates =
-        [ ("setup", ".agents/setup", 0o700);
-          ("resume", ".agents/resume", 0o700);
-          ("runtime_metadata.py", ".agents/runtime_metadata.py", 0o600);
-          ("skill.md", ".agents/skills/managing-clamp-knowledge/SKILL.md", 0o600);
-          ("AGENTS.md", "AGENTS.md", 0o600);
-          ("README.md", "README.md", 0o600);
-          ("gitignore", ".gitignore", 0o600) ]
+      let lock_contents =
+        Option.value lock
+          ~default:
+            (Printf.sprintf
+               "version=%s\nrevision=%s\nurl=%s\nsha256=%s\n"
+               runtime_version runtime_revision runtime_url runtime_sha256)
       in
       let loaded =
-        List.fold_left
-          (fun result (source, destination, mode) ->
-            Result.bind result (fun values ->
-                Result.map (fun contents -> (destination, mode, contents) :: values)
-                  (template root source)))
-          (Ok []) templates
+        match lock with
+        | Some _ ->
+            (match
+               Scaffold.generated_files ~runtime_root:root ~lock:lock_contents
+                 ~version:runtime_version
+             with
+            | Ok files ->
+                Ok
+                  (List.map
+                     (fun (file : Scaffold.generated_file) ->
+                       (file.path, file.mode, file.contents))
+                     files)
+            | Error failure -> error failure.code failure.message)
+        | None ->
+            let templates =
+              [ ("setup", ".agents/setup", 0o700);
+                ("resume", ".agents/resume", 0o700);
+                ("runtime_metadata.py", ".agents/runtime_metadata.py", 0o600);
+                ("skill.md", ".agents/skills/managing-clamp-knowledge/SKILL.md", 0o600);
+                ("AGENTS.md", "AGENTS.md", 0o600);
+                ("README.md", "README.md", 0o600);
+                ("gitignore", ".gitignore", 0o600) ]
+            in
+            List.fold_left
+              (fun result (source, destination, mode) ->
+                Result.bind result (fun values ->
+                    Result.map
+                      (fun contents ->
+                        (destination, mode,
+                         legacy_template_contents source contents)
+                        :: values)
+                      (template root source)))
+              (Ok []) templates
       in
       Result.bind loaded (fun templates ->
           let parent_descriptor =
@@ -300,15 +345,10 @@ let create_internal ~target ~source_repository ~runtime_version ~runtime_revisio
                       (fun (destination, mode, contents) ->
                         write_file ~mode (Filename.concat staged destination) contents)
                       templates;
-                    let lock =
-                      Option.value lock
-                        ~default:
-                          (Printf.sprintf
-                             "version=%s\nrevision=%s\nurl=%s\nsha256=%s\n"
-                             runtime_version runtime_revision runtime_url
-                             runtime_sha256)
-                    in
-                    write_file (Filename.concat staged ".agents/clamp-runtime.lock") lock;
+                    if lock = None then
+                      write_file
+                        (Filename.concat staged ".agents/clamp-runtime.lock")
+                        lock_contents;
                     write_file (Filename.concat staged "clamp.yaml")
                       (canonical_config source_repository);
                     write_file (Filename.concat staged "TODO.md")

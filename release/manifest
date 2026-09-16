@@ -13,8 +13,9 @@ REQUIRED = [
     "bin/kb", "share/clamp/migrations/0001_enable_vector.sql",
     "share/clamp/migrations/0002_application_schema.sql",
     "share/clamp/templates/AGENTS.md", "share/clamp/templates/README.md",
-    "share/clamp/templates/gitignore", "share/clamp/templates/resume",
-    "share/clamp/templates/runtime_metadata.py", "share/clamp/templates/setup",
+    "share/clamp/templates/gitignore", "share/clamp/templates/kb",
+    "share/clamp/templates/resume", "share/clamp/templates/runtime_metadata.py",
+    "share/clamp/templates/setup", "share/clamp/templates/setup-local",
     "share/clamp/templates/skill.md",
 ]
 
@@ -51,6 +52,7 @@ for archive_name in archive_names:
             name = member.name.rstrip("/")
             parts = name.split("/")
             if (not parts or parts[0] != root or any(
+                    part in (".", "..") or
                     not re.fullmatch(r"[A-Za-z0-9._+-]+", part) for part in parts)):
                 fail(f"unsafe archive path: {archive}")
             if not (member.isdir() or member.isfile()) or member.issym() or member.islnk():
@@ -60,6 +62,11 @@ for archive_name in archive_names:
             entries.add(name)
             if member.isfile():
                 relative = name[len(root) + 1:]
+                allowed_library = relative.startswith("lib/") and relative.count("/") == 1
+                allowed_license = relative.startswith("share/licenses/")
+                if (relative not in REQUIRED and not allowed_library
+                        and not allowed_license):
+                    fail(f"unexpected archive file: {archive}")
                 extracted = bundle.extractfile(member)
                 if extracted is None:
                     fail(f"unreadable archive entry: {archive}")
@@ -92,7 +99,7 @@ for archive_name in archive_names:
         "archive_sha256": digest,
         "archive_root": root,
         "archive_size": len(raw),
-        "required_files": REQUIRED,
+        "required_files": sorted(files),
     })
 
 records.sort(key=lambda value: value["target"])

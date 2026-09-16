@@ -181,15 +181,15 @@ tests must not convert an Orb observation or mock into native target evidence.
 | PRD 0.2 criterion | Repository-owned Phase 1 evidence | Remaining native/implementation gate |
 | --- | --- | --- |
 | L1. Advertised targets are natively qualified | `v0_2_phase1_test` / `contract freeze` / `target and environment fixtures`; native ext4/APFS, frozen bootstrap contracts, isolated authenticated read-only Amp Git, local-runner thread/email interfaces, ordinary-update behavior, and private PostgreSQL 15.19/pgvector 0.8.1 feasibility evidence on both candidates | **Later phases:** runtime/package implementation, signing where applicable, application-level durability, and end-to-end gates. |
-| L2. Setup is clean, idempotent, and failure-preserving | Fixture contract only | Phase 4 implementation plus native end-to-end. |
-| L3. Repository launcher selects independent pins | Fresh-0.2 scaffold inventory fixture | Phase 4 implementation and alternating-repository native test. |
-| L4. Exact 0.1.4 migration is fail-closed | Exact and owner-modified scaffold fixtures | Phase 4 migration, interruption, and recovery tests. |
+| L2. Setup is clean, idempotent, and failure-preserving | Phase 4 setup preflight, archive/install/cache helper tests, and tracked-mutation checks | Real-clone setup twice, injected-install failure, and native end-to-end remain release gates. |
+| L3. Repository launcher selects independent pins | Phase 4 hostile-directory launcher test plus fresh-0.2 scaffold inventory | Alternating-repository native end-to-end remains a release gate. |
+| L4. Exact 0.1.4 migration is fail-closed | Phase 4 exact/current/modified/interrupted/foreign-parent migration and rollback tests | Final-artifact Orb bootstrap and reviewed commit/push workflow remain release/operator gates. |
 | L5. Local Amp authentication is narrow | Sanitized Orb/clone observation fixture; hostile-state cases | Phase 5 helper implementation and real local-login/update gate on each target. |
 | L6. Local and Orb semantics agree | Existing v1 acceptance remains the required baseline | Phase 6 cross-executor workflow. |
 | L7. Conflict notification remains preservation-gated | Existing v1 preservation/email evidence; Linux and Mac authenticated local-runner thread/owner-email interface feasibility passed without sending email | Preservation ordering, request deduplication, and notification execution remain Phase 6 gates on both targets. |
 | L8. Credentials are operation-scoped | Stable existing missing-credential codes in the contract fixture | Phase 6 credential-removal workflow, including indexed `get`. |
 | L9. Concurrent sync and telemetry remain honest | Existing v1 sync/retrieval evidence | Phase 6 delayed cross-executor sync and uncertain-COMMIT workflow. |
-| L10. Generated instructions are consumer-only | Fresh-0.2 source-free inventory fixture | Phase 4 generated-template audit and golden tests. |
+| L10. Generated instructions are consumer-only | Fresh-0.2 source-free inventory fixture and Phase 4 generated-template audit | Final-artifact generated-repository review remains a release gate. |
 | L11. Machine contracts remain stable and body-free | `v0_2_phase1_test` / `contract freeze` / `stable envelopes and codes` | Each implementation phase must produce the frozen codes. |
 | L12. Release is compatible and promoted once | Exact public v0.1.4 identities in the scaffold fixture | Final-artifact compatibility, native target, draft, and publication gates. |
 
@@ -254,3 +254,31 @@ hardened runtime, notarization, Gatekeeper checks, clean-machine
 installation/upgrade, physical power-loss/storage qualification, immutable
 0.1.4 updater compatibility, final committed-asset reproducibility, production
 services, and publication remain separately authorized release gates.
+
+## 0.2.0 Phase 4 portable-scaffold acceptance
+
+Phase 4 is repository-complete when `scaffold_test`, `initializer_test`,
+`upgrade_test`, `v0_2_phase1_test`, and the bootstrap runtime-metadata rule pass
+on Linux and the affected launcher/setup/scaffold/runtime-package checks pass on
+native Apple silicon. `scaffold_test` covers exact 0.1.4 migration, already-
+current v2 state, owner modifications, reported-failure rollback, durable
+interruption recovery, foreign file and parent replacement, reruns, hostile
+working directories/PATH, body-free setup preflight, and source-free generated
+instructions. The runtime-metadata rule exercises digest verification, bounded
+archive extraction, effective-user-private installation roots, immutable
+digest-keyed installation, and idempotent manifest caching.
+
+That gate passed on Linux and native macOS 26.5.2 arm64. The final macOS run
+passed 174 Alcotest cases plus both Python rules; focused scaffold 23/23,
+initializer 7/7, upgrade 12/12, and secure-filesystem 9/9 suites passed under
+both umasks 022 and 077. The two macOS package builds were byte-identical
+(SHA-256 `06fc530fdc077cef806bb3d75745004f2b804aac17307b0d99cd04c891ea4a9d`),
+empty-environment extraction and dependency checks passed, and Oracle's final
+implementation review was green. Interruption cases are executed APFS fixture
+and syscall evidence, not physical power-loss qualification.
+
+Repository-owned Phase 4 evidence does not qualify local Amp authentication or
+declare either target production-supported. Real `amp clone`, setup twice,
+alternating independently pinned repositories, retained-runtime failure
+injection, local helper enrollment, and end-to-end local knowledge workflows
+remain native Phase 5/6 and final-release gates.

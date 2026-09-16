@@ -114,7 +114,8 @@ def main():
                 raise RuntimeError("dependency escapes package")
     for source in sorted((repo / "db/migrations").glob("*.sql")):
         shutil.copyfile(source, stage / "share/clamp/migrations" / source.name)
-    for filename in ["setup", "resume", "skill.md", "AGENTS.md", "README.md", "gitignore", "runtime_metadata.py"]:
+    for filename in ["setup", "resume", "setup-local", "kb", "skill.md",
+                     "AGENTS.md", "README.md", "gitignore", "runtime_metadata.py"]:
         shutil.copyfile(repo / "runtime/templates" / filename, stage / "share/clamp/templates" / filename)
     shutil.copyfile(repo / "LICENSE", stage / "LICENSE")
     (stage / "VERSION").write_text(version + "\n")
@@ -132,7 +133,8 @@ def main():
         "Developer signing, hardened runtime, notarization, and clean-machine\n"
         "Gatekeeper acceptance remain explicit operator-controlled release gates.\n")
     for path in sorted(stage.rglob("*")):
-        executable_file = path == executable or path.parent == stage / "lib" or path.name in ("setup", "resume")
+        executable_file = (path == executable or path.parent == stage / "lib"
+                           or path.name in ("setup", "resume", "setup-local", "kb"))
         path.chmod(0o755 if path.is_dir() or executable_file else 0o644)
         os.utime(path, (epoch, epoch))
     stage.chmod(0o755)

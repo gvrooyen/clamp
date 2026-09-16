@@ -1,0 +1,233 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+PATH=/usr/bin:/bin
+export PATH
+
+fail() {
+  local code="$1" details="$2" status="${3:-2}"
+  printf '{"ok":false,"code":"%s","message":"Local Clamp setup failed.","details":%s}\n' \
+    "$code" "$details"
+  exit "$status"
+}
+
+fail_cause() { fail "$1" "{\"cause\":\"$2\"}" "${3:-2}"; }
+
+git_safe() {
+  env -i HOME="$HOME" PATH=/usr/bin:/bin GIT_CONFIG_NOSYSTEM=1 \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false \
+    SSH_ASKPASS=/bin/false /usr/bin/git "$@"
+}
+
+script_dir="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -P -- "$script_dir/.." && pwd)"
+runtime_lock="$script_dir/clamp-runtime.lock"
+runtime_metadata="$script_dir/runtime_metadata.py"
+launcher="$script_dir/kb"
+
+[[ $# -eq 0 ]] || fail_cause local_setup_repository_invalid value
+case "$(/usr/bin/uname -s 2>/dev/null):$(/usr/bin/uname -m 2>/dev/null)" in
+  Linux:x86_64) target=linux-x86_64; git_min=2.39; python_min=3.11; curl_min=7.88.1 ;;
+  Darwin:arm64) target=macos-arm64; git_min=2.50.1; python_min=3.9.6; curl_min=8.7.1 ;;
+  *) fail local_target_unsupported '{"target":"unsupported"}' ;;
+esac
+for record in "git:/usr/bin/git:$git_min" "python3:/usr/bin/python3:$python_min" \
+              "curl:/usr/bin/curl:$curl_min"; do
+  name="${record%%:*}"; remainder="${record#*:}"
+  tool="${remainder%%:*}"; minimum="${remainder#*:}"
+  [[ -x "$tool" ]] || fail local_prerequisite_missing \
+    "{\"prerequisite\":\"$name\",\"minimum_version\":\"$minimum\"}"
+done
+git_root="$(git_safe -C "$repo_root" rev-parse --path-format=absolute --show-toplevel 2>/dev/null)" \
+  || fail_cause local_setup_repository_invalid not_git_repository
+git_root="$(cd -P -- "$git_root" && pwd)"
+[[ "$git_root" == "$repo_root" ]] \
+  || fail_cause local_setup_repository_invalid root_mismatch
+dangerous_status=0
+dangerous="$(git_safe -C "$repo_root" config --includes --name-only --get-regexp \
+  '^(credential\.|http\.|url\..*\.insteadof$|include\.|includeif\.|core\.hookspath$|core\.fsmonitor$)' \
+  2>/dev/null)" || dangerous_status=$?
+(( dangerous_status <= 1 )) || fail_cause local_setup_repository_invalid gitdir_unsafe
+[[ -z "$dangerous" ]] || fail_cause local_setup_repository_invalid gitdir_unsafe
+status_code=0
+status_output="$(git_safe -C "$repo_root" status --porcelain=v1 --untracked-files=all \
+  2>/dev/null)" || status_code=$?
+(( status_code == 0 )) || fail_cause local_setup_repository_invalid verify
+[[ -z "$status_output" ]] || fail local_setup_dirty_worktree '{"paths":["worktree"]}'
+
+origin="$(git_safe -C "$repo_root" remote get-url --all origin 2>/dev/null || true)"
+[[ -n "$origin" ]] || fail_cause local_setup_origin_invalid origin_missing
+[[ "$origin" == https://ampcode.com/git/@*/-/* && "$origin" != *$'\n'* ]] \
+  || fail_cause local_setup_origin_invalid origin_not_amp_https
+push_origin="$(git_safe -C "$repo_root" remote get-url --push --all origin 2>/dev/null || true)"
+[[ "$push_origin" == "$origin" ]] || fail_cause local_setup_origin_invalid origin_identity_mismatch
+source_repository="$(/usr/bin/python3 -I "$runtime_metadata" source "$repo_root/clamp.yaml")" \
+  || fail_cause local_setup_repository_invalid schema
+[[ "$origin" == "https://$source_repository" ]] \
+  || fail_cause local_setup_origin_invalid origin_identity_mismatch
+author_name="$(git_safe -C "$repo_root" config --local --get user.name 2>/dev/null || true)"
+author_email="$(git_safe -C "$repo_root" config --local --get user.email 2>/dev/null || true)"
+missing_author=()
+[[ -n "$author_name" && "$author_name" != *$'\n'* ]] || missing_author+=(user.name)
+[[ "$author_email" == *@* && "$author_email" != *$'\n'* ]] || missing_author+=(user.email)
+if (( ${#missing_author[@]} != 0 )); then
+  if (( ${#missing_author[@]} == 2 )); then fields='["user.name","user.email"]'
+  elif [[ "${missing_author[0]}" == user.name ]]; then fields='["user.name"]'
+  else fields='["user.email"]'; fi
+  fail local_git_author_missing "{\"fields\":$fields}"
+fi
+[[ -e "$HOME/.amp/bin/amp" ]] || fail local_amp_missing '{}' 4
+/usr/bin/python3 -I "$runtime_metadata" verify-amp "$HOME" "$HOME/.amp/bin/amp" \
+  || fail local_amp_installation_unsafe \
+    '{"cause":"permissions","path_kind":"amp_executable"}' 4
+amp_version_fields="$(env -i HOME="$HOME" PATH=/usr/bin:/bin \
+  /usr/bin/python3 -I "$runtime_metadata" amp-version-exec "$HOME" \
+  "$HOME/.amp/bin/amp" 2>/dev/null)" || fail local_amp_missing '{}' 4
+
+read_fields() {
+  local line
+  FIELDS=()
+  while IFS= read -r line; do FIELDS+=("$line"); done
+}
+
+read_fields <<<"$amp_version_fields"
+case "${FIELDS[0]:-}" in
+  ok) observed_amp_version="${FIELDS[1]}" ;;
+  unsupported)
+    fail local_amp_version_unsupported \
+      "{\"minimum_version\":\"0.0.1789113641-gcd8b8a\",\"observed_version\":\"${FIELDS[1]}\"}" 4 ;;
+  *) fail local_amp_missing '{}' 4 ;;
+esac
+
+if ! amp_ready_error="$(env -i HOME="$HOME" PATH=/usr/bin:/bin /usr/bin/python3 -I \
+     "$runtime_metadata" amp-ready "$HOME" "$HOME/.amp/bin/amp" "$repo_root" \
+     "$origin" 2>&1)"; then
+  if [[ "$amp_ready_error" == "command timeout" ]]; then
+    fail local_amp_helper_timeout '{"timeout_seconds":10}' 5
+  fi
+  fail_cause local_amp_remote_unavailable verify 5
+fi
+
+preflight_output="$(/usr/bin/python3 -I "$runtime_metadata" preflight "$target" "$repo_root")" \
+  || fail_cause local_setup_repository_invalid verify
+read_fields <<<"$preflight_output"
+case "${FIELDS[0]:-}" in
+  ok) [[ "${FIELDS[1]:-}" == "$target" ]] || fail_cause local_setup_repository_invalid verify ;;
+  prerequisite)
+    fail local_prerequisite_missing \
+      "{\"prerequisite\":\"${FIELDS[1]}\",\"minimum_version\":\"${FIELDS[2]}\"}" ;;
+  filesystem)
+    fail local_filesystem_unsupported \
+      "{\"target\":\"${FIELDS[1]}\",\"filesystem\":\"${FIELDS[2]}\"}" ;;
+  target)
+    fail local_target_unqualified \
+      "{\"target\":\"${FIELDS[1]}\",\"gate\":\"${FIELDS[2]}\"}" ;;
+  *) fail_cause local_setup_repository_invalid verify ;;
+esac
+
+lock_output="$(/usr/bin/python3 -I "$runtime_metadata" lock "$runtime_lock" "$target" 2>/dev/null)" \
+  || fail_cause runtime_lock_v2_invalid schema
+read_fields <<<"$lock_output"
+(( ${#FIELDS[@]} == 5 )) || fail_cause runtime_lock_v2_invalid schema
+[[ "${FIELDS[0]}" == v2 ]] || fail_cause runtime_lock_v2_invalid value
+version="${FIELDS[1]}"
+revision="${FIELDS[2]}"
+manifest_url="${FIELDS[3]}"
+manifest_sha256="${FIELDS[4]}"
+
+install_base="$HOME/.local/share/clamp/kb"
+manifest_dir="$install_base/manifests"
+runtime_dir="$install_base/runtimes/$target"
+/usr/bin/python3 -I "$runtime_metadata" private-dirs "$HOME" "$install_base" \
+  "$manifest_dir" "$install_base/runtimes" "$runtime_dir" \
+  || fail local_runtime_installation_unsafe \
+    '{"cause":"permissions","path_kind":"install_root"}'
+
+temporary="$(/usr/bin/python3 -I - "$install_base" <<'PY'
+import os, secrets, sys
+path = os.path.join(sys.argv[1], ".setup-" + secrets.token_hex(16))
+os.mkdir(path, 0o700)
+print(path)
+PY
+)" || fail_cause local_runtime_install_failed install 70
+trap 'rm -rf -- "${temporary:-}"' EXIT
+manifest="$temporary/manifest.json"
+manifest_download_status=0
+/usr/bin/curl --disable --fail --silent --show-error --location --proto '=https' \
+  --proto-redir '=https' --tlsv1.2 --retry 3 --connect-timeout 10 \
+  --max-time 30 --max-filesize 1048576 "$manifest_url" --output "$manifest" \
+  || manifest_download_status=$?
+if (( manifest_download_status != 0 )); then
+  if (( manifest_download_status == 63 )); then
+    fail runtime_manifest_too_large '{"limit_bytes":1048576}'
+  fi
+  fail_cause runtime_download_failed download 5
+fi
+/usr/bin/python3 -I "$runtime_metadata" digest "$manifest" "$manifest_sha256" \
+  || fail runtime_manifest_checksum_mismatch '{}'
+manifest_error="$temporary/manifest-error"
+if ! manifest_output="$(/usr/bin/python3 -I "$runtime_metadata" manifest "$manifest" \
+     "$version" "$revision" "$target" "$manifest_sha256" 2>"$manifest_error")"; then
+  if [[ "$(cat -- "$manifest_error")" == "target missing" ]]; then
+    fail runtime_manifest_target_missing "{\"target\":\"$target\"}"
+  fi
+  fail_cause runtime_manifest_invalid schema
+fi
+read_fields <<<"$manifest_output"
+(( ${#FIELDS[@]} > 4 )) || fail_cause runtime_manifest_invalid schema
+archive_url="${FIELDS[0]}"
+archive_sha256="${FIELDS[1]}"
+archive_root="${FIELDS[2]}"
+archive_size="${FIELDS[3]}"
+required_files=("${FIELDS[@]:4}")
+installation="$runtime_dir/$archive_sha256"
+changed=true
+
+if /usr/bin/python3 -I "$runtime_metadata" installed "$installation" "$version" \
+     "$revision" "$archive_sha256"; then
+  changed=false
+else
+  archive="$temporary/runtime.tar.gz"
+  archive_download_status=0
+  /usr/bin/curl --disable --fail --silent --show-error --location --proto '=https' \
+    --proto-redir '=https' --tlsv1.2 --retry 3 --connect-timeout 10 \
+    --max-time 120 --max-filesize "$archive_size" "$archive_url" --output "$archive" \
+    || archive_download_status=$?
+  if (( archive_download_status != 0 )); then
+    if (( archive_download_status == 63 )); then
+      fail runtime_archive_too_large "{\"limit_bytes\":$archive_size}"
+    fi
+    fail_cause runtime_download_failed download 5
+  fi
+  /usr/bin/python3 -I "$runtime_metadata" digest "$archive" "$archive_sha256" \
+    || fail runtime_archive_checksum_mismatch '{}'
+  archive_error="$temporary/archive-error"
+  if ! /usr/bin/python3 -I "$runtime_metadata" extract "$archive" "$temporary/extracted" \
+       "$version" "$revision" "$archive_root" "$archive_size" \
+       "${required_files[@]}" 2>"$archive_error"; then
+    if [[ "$(cat -- "$archive_error")" == "runtime archive too large" ]]; then
+      fail runtime_archive_too_large '{"limit_bytes":67108864}'
+    fi
+    fail_cause runtime_archive_invalid extract
+  fi
+  payload="$temporary/extracted/$archive_root"
+  printf '%s\n' "$archive_sha256" >"$payload/.archive-sha256"
+  chmod 0600 "$payload/.archive-sha256"
+  "$payload/bin/kb" validate --repo "$repo_root" --json >/dev/null \
+    || fail_cause local_runtime_install_failed verify 70
+  /usr/bin/python3 -I "$runtime_metadata" install "$payload" "$installation" \
+    || fail_cause local_runtime_install_failed install 70
+fi
+
+/usr/bin/python3 -I "$runtime_metadata" cache "$manifest" "$manifest_dir/${manifest_sha256}.json" \
+  "$manifest_sha256" || fail_cause local_runtime_install_failed install 70
+"$launcher" --version >/dev/null || fail_cause local_runtime_install_failed verify 70
+"$launcher" validate --json >/dev/null || fail_cause local_runtime_install_failed verify 70
+
+for name in OPENROUTER_API_KEY KB_DATABASE_URL KB_DATABASE_DIRECT_URL; do
+  if [[ -n "${!name:-}" ]]; then state=present; else state=missing; fi
+  printf '[clamp setup-local] %s: %s\n' "$name" "$state" >&2
+done
+if [[ "$changed" == true ]]; then code=local_setup_installed; else code=local_setup_unchanged; fi
+printf '{"ok":true,"code":"%s","data":{"target":"%s","runtime_revision":"%s","runtime_sha256":"%s"}}\n' \
+  "$code" "$target" "$revision" "$archive_sha256"
