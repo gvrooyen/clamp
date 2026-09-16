@@ -32,6 +32,11 @@ Clamp v1 has no recurring tasks, reminders, or background indexer, although
 Amp's scheduled agent tasks can be used to facilitate
 these. Clamp v1 has no multi-user knowledge model.
 
+An optional, separately deployed [Telegram bridge](./integrations/telegram-bridge/README.md)
+can forward one allowlisted user's text and voice notes to an existing Amp
+thread and let that thread deliver scheduled reminders to Telegram. It is not
+part of the `kb` runtime and does not change Clamp v1's durability model.
+
 ## Get started
 
 Choose a setup:
@@ -169,6 +174,7 @@ installation can make its revision pin inconsistent. See
 - [Getting started](./docs/getting-started.md)
 - [CLI guide](./docs/cli.md)
 - [Using Clamp with Amp](./docs/amp.md)
+- [Telegram bridge](./integrations/telegram-bridge/README.md)
 - [Architecture](./ARCHITECTURE.md)
 - [Knowledge format and configuration](./docs/knowledge-format.md)
 - [Operations](./docs/operations.md)

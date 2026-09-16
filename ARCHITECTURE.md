@@ -63,6 +63,21 @@ and JSON result encoding. Interfaces and test seams should exist only where
 they isolate a real responsibility or controllable effect, not merely to mirror
 every external dependency.
 
+## Optional companion integrations
+
+`integrations/` contains services that a user may deploy separately from the
+Clamp runtime. They are not included in the source-free `kb` package, do not run
+from Orb setup, and cannot become authorities for knowledge or task state.
+
+The Telegram bridge has one configured user/chat/thread tuple. Fly receives
+authenticated, allowlisted Telegram updates and forwards them through the Amp
+SDK; the target Amp thread can call a bearer-authenticated MCP tool to send a
+scheduled reminder back to Telegram. Its queue, update-ID deduplication, and
+short-lived voice media are bounded and process-local by product choice. The
+deployment therefore makes no durability claim across restart or ambiguous
+external acknowledgement. Its complete deployment and security contract is in
+[`integrations/telegram-bridge/README.md`](./integrations/telegram-bridge/README.md).
+
 ## Data ownership
 
 Clamp has three data classes:

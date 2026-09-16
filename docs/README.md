@@ -10,6 +10,8 @@ Start with the [project README](../README.md) for the short overview.
   sequences.
 - [Using Clamp with Amp](./amp.md) – agent prompts, the repository skill, and
   publication behavior.
+- [Telegram bridge](../integrations/telegram-bridge/README.md) – optional
+  single-user text, voice-note, and scheduled-reminder integration on Fly.io.
 - [Knowledge format and configuration](./knowledge-format.md) – repository
   layout, OKF concepts, provenance, tasks, and `clamp.yaml`.
 

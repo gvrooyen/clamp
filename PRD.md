@@ -56,6 +56,15 @@ only authoritative version of the knowledge store.
 - Guaranteed email delivery independently of the active Amp agent.
 - Preserving access telemetry if the external database is lost.
 
+These non-goals describe the native `kb` product. The repository may also
+contain optional, separately deployed companion integrations. In particular,
+the Telegram bridge under `integrations/telegram-bridge/` forwards one
+allowlisted user's text and voice notes to one existing Amp thread and exposes
+an authenticated tool that the thread can use for scheduled Telegram
+reminders. It neither implements recurrence in `kb` nor participates in
+knowledge storage, indexing, task state, or publication. Its user-owned Fly
+deployment is explicitly best effort and is not required for Clamp operation.
+
 ## Architecture and durability model
 
 ```text
@@ -846,7 +855,9 @@ detects and `kb todo` repairs; v1 deliberately uses no write-ahead marker.
 
 The implementation is a native OCaml CLI named `kb`, accompanied by a
 repo-local Amp skill. There is no v1 MCP server, plugin, or long-running
-service.
+service in the Clamp runtime. Optional companion integrations are separate
+deployments and must not become a dependency of the CLI, skill, repository
+setup, or source-free runtime package.
 
 The CLI provides at least:
 
@@ -1514,8 +1525,9 @@ retrieval gates in their own environment with explicit approval.
 - Add chunked concepts if corpus documents outgrow one-embedding retrieval.
 - Consider trust-tier ranking after enough verified and unverified examples
   exist to evaluate it.
-- Consider recurring tasks, reminders, or scheduled task checks in a later
-  product phase.
+- Consider native recurring tasks, reminders, or scheduled task checks in a
+  later product phase. The optional Telegram companion does not add these to
+  `kb`.
 - Consider telemetry export or longer retention if access history becomes
   valuable enough to require stronger durability.
 - Consider an external email provider only if conflict notification must become

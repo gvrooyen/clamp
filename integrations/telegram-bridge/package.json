@@ -1,0 +1,24 @@
+{
+  "name": "@clamp/telegram-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/src/index.js",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  },
+  "dependencies": {
+    "@ampcode/sdk": "0.1.0-20260823161614-g3631dc6",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.3",
+    "typescript": "5.9.2"
+  }
+}

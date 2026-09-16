@@ -3,7 +3,10 @@
 An initialized private repository contains
 `.agents/skills/managing-clamp-knowledge/SKILL.md`. Amp loads this skill when a
 request involves knowledge, tasks, retrieval, publication, or conflict
-recovery. No MCP server, plugin, daemon, hook, or companion process is needed.
+recovery. No MCP server, plugin, daemon, hook, or companion process is needed
+for normal Clamp operation. The separately deployed
+[Telegram bridge](../integrations/telegram-bridge/README.md) is optional and
+does not participate in knowledge storage or publication.
 
 ## What to ask
 
