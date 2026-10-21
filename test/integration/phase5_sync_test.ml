@@ -368,7 +368,7 @@ let core_convergence () =
           ~connection:env.connection
           ~embed:(fun _ -> Error { Clamp.Sync.kind = Transient; code = "fixture_failed";
                                    message = "Fixture embedding failed.";
-                                    diagnostics = [] })
+                                   details = []; diagnostics = [] })
           ~reembed:false ~allow_mass_deletion:false ~target_commit:None
       in
       check_error "embedding failure" "fixture_failed" failed;
@@ -1180,7 +1180,7 @@ let await_process_exit pid =
   in
   loop 100
 
-let with_watchdog label operation =
+let with_watchdog ?(timeout = 15.) label operation =
   let child = Unix.fork () in
   if child = 0 then
     (try operation (); Unix._exit 0
@@ -1188,7 +1188,7 @@ let with_watchdog label operation =
        prerr_endline (label ^ ": " ^ Printexc.to_string failure);
        Unix._exit 97)
   else
-    let deadline = Unix.gettimeofday () +. 15. in
+    let deadline = Unix.gettimeofday () +. timeout in
     let rec wait () =
       match Unix.waitpid [ Unix.WNOHANG ] child with
       | 0, _ when Unix.gettimeofday () < deadline -> Unix.sleepf 0.02; wait ()
@@ -1217,7 +1217,7 @@ let with_variables variables operation =
       operation ())
 
 let amp_authenticated_git () =
-  with_watchdog "Amp authenticated Git" (fun () ->
+  with_watchdog ~timeout:45. "Amp authenticated Git" (fun () ->
     let root = Filename.temp_file "clamp-phase5-amp-auth-" "" in
     Sys.remove root; Unix.mkdir root 0o700;
     let root = Unix.realpath root in
@@ -1229,6 +1229,7 @@ let amp_authenticated_git () =
       and bare = Filename.concat root "remote.git"
       and clone = Filename.concat root "clone"
       and helper_marker = Filename.concat root "trusted-helper-ran"
+      and descendant_marker = Filename.concat root "trusted-helper-descendant"
       and hostile_marker = Filename.concat root "hostile-helper-ran"
       and port_file = Filename.concat root "port"
       and certificate = Filename.concat root "loopback.crt"
@@ -1242,13 +1243,19 @@ let amp_authenticated_git () =
       git source [ "add"; "README" ];
       git source [ "commit"; "--quiet"; "-m"; "fixture" ];
       command "git" [ "clone"; "--quiet"; "--bare"; source; bare ];
+      git bare [ "config"; "http.receivepack"; "true" ];
       command "git" [ "clone"; "--quiet"; bare; clone ];
+      git clone [ "config"; "user.name"; "Clamp Test" ];
+      git clone [ "config"; "user.email"; "clamp-test@local.invalid" ];
       let helper = Filename.concat bin "amp" in
+      let local_source = "ampcode.com/git/@fixture/-/clamp" in
+      let secret = Printf.sprintf "fixture-%d-%d" (Unix.getpid ()) !counter in
       let write_helper mode =
         write helper
-          ("#!/usr/bin/python3\nimport os,pathlib,sys,time\nxdg=os.environ.get('XDG_CONFIG_HOME')\nexpected=os.path.join(os.environ['HOME'],'.config')\nif xdg != expected: sys.exit(3)\nconfig=pathlib.Path(xdg); config.mkdir(parents=True,exist_ok=True)\nprobe=config/'.clamp-write-probe'; probe.write_text('ok'); probe.unlink()\nmarker=pathlib.Path('" ^
-           helper_marker ^ "')\nmode='" ^ mode ^
-           "'\nmarker.write_text(str(os.getpid()))\nif mode == 'hang': time.sleep(60)\nif mode == 'error': sys.exit(1)\nif mode == 'output': sys.stderr.write('x' * 1048576); sys.stderr.flush(); time.sleep(60)\nif os.environ.get('POISON_AUTH') is not None: sys.exit(2)\nif sys.argv[1:] == ['git-credential-helper','get']:\n sys.stdin.read(); print('username=amp'); print('password='+os.environ['AMP_API_KEY']); print()\n");
+          ("#!/usr/bin/python3\nimport os,pathlib,subprocess,sys,time\nxdg=os.environ.get('XDG_CONFIG_HOME')\nexpected=os.path.join(os.environ['HOME'],'.config')\nif 'AMP_API_KEY' in os.environ:\n if xdg != expected: sys.exit(3)\n config=pathlib.Path(xdg); config.mkdir(parents=True,exist_ok=True)\n probe=config/'.clamp-write-probe'; probe.write_text('ok'); probe.unlink()\nelse:\n required={'GIT_CONFIG_NOSYSTEM':'1','GIT_CONFIG_GLOBAL':'/dev/null','GIT_TERMINAL_PROMPT':'0'}\n path=os.environ.get('PATH','').split(':')\n git_exec=subprocess.check_output(['/usr/bin/git','--exec-path'],env={'PATH':'/usr/bin:/bin'},text=True).strip()\n if (path[-2:]!=['/usr/bin','/bin'] or any(p!=git_exec for p in path[:-2]) or any(os.environ.get(k)!=v for k,v in required.items()) or xdg is not None or 'XDG_STATE_HOME' in os.environ): sys.exit(3)\nmarker=pathlib.Path('" ^
+           helper_marker ^ "')\ndescendant=pathlib.Path('" ^ descendant_marker ^
+           "')\nmode='" ^ mode ^
+           "'\nif sys.argv[1:] == ['--version']:\n print('amp 0.0.1789171288-gd95a61'); sys.exit(0)\nmarker.write_text(str(os.getpid()))\nif mode.startswith('fork'):\n pid=os.fork()\n if pid == 0:\n  descendant.write_text(str(os.getpid()))\n  if mode == 'fork-closed':\n   os.close(0); os.close(1); os.close(2)\n  time.sleep(60); os._exit(0)\n sys.exit(1)\nif mode.startswith('hang'): time.sleep(60)\nif mode == 'error': sys.exit(1)\nif mode == 'output': sys.stderr.write('x' * 1048576); sys.stderr.flush(); time.sleep(60)\nif mode == 'malformed': print('not-a-credential'); sys.exit(0)\nif mode == 'store-error' and sys.argv[1:] == ['git-credential-helper','store']: sys.exit(1)\nif os.environ.get('POISON_AUTH') is not None: sys.exit(2)\nif sys.argv[1:] == ['git-credential-helper','get']:\n sys.stdin.read(); print('username=amp'); print('password='+os.environ.get('AMP_API_KEY','" ^ secret ^ "')); print()\n");
         Unix.chmod helper 0o755
       in
       write_helper "ok";
@@ -1263,7 +1270,6 @@ let amp_authenticated_git () =
           "-keyout"; private_key; "-out"; certificate ];
       write server_script
         "import base64,http.server,os,pathlib,ssl,subprocess,sys,urllib.parse\nroot,portfile,secret,cert,key=sys.argv[1:6]\nexpected='Basic '+base64.b64encode(('amp:'+secret).encode()).decode()\nclass H(http.server.BaseHTTPRequestHandler):\n def log_message(self,*args): pass\n def handle_git(self):\n  if self.headers.get('Authorization') != expected:\n   self.send_response(401); self.send_header('WWW-Authenticate','Basic realm=fixture'); self.send_header('Content-Length','0'); self.end_headers(); return\n  parsed=urllib.parse.urlsplit(self.path); length=int(self.headers.get('Content-Length','0')); body=self.rfile.read(length)\n  env={'PATH':'/usr/bin:/bin','GIT_PROJECT_ROOT':root,'GIT_HTTP_EXPORT_ALL':'1','PATH_INFO':parsed.path,'QUERY_STRING':parsed.query,'REQUEST_METHOD':self.command,'CONTENT_TYPE':self.headers.get('Content-Type',''),'CONTENT_LENGTH':str(length),'REMOTE_USER':'amp'}\n  result=subprocess.run(['/usr/bin/git','http-backend'],input=body,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env=env,check=True)\n  head,payload=result.stdout.split(b'\\r\\n\\r\\n',1); lines=head.decode().split('\\r\\n'); status=200\n  if lines and lines[0].startswith('Status:'): status=int(lines.pop(0).split()[1])\n  self.send_response(status)\n  for line in lines:\n   if line: self.send_header(*line.split(': ',1))\n  self.send_header('Content-Length',str(len(payload))); self.end_headers(); self.wfile.write(payload)\n def do_GET(self): self.handle_git()\n def do_POST(self): self.handle_git()\nserver=http.server.HTTPServer(('127.0.0.1',0),H); context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); context.load_cert_chain(cert,key); server.socket=context.wrap_socket(server.socket,server_side=True); pathlib.Path(portfile).write_text(str(server.server_port)); server.serve_forever()\n";
-      let secret = Printf.sprintf "fixture-%d-%d" (Unix.getpid ()) !counter in
       let dev_null = Unix.openfile "/dev/null" [ Unix.O_RDWR; Unix.O_CLOEXEC ] 0 in
       let server_arguments =
         [| "/usr/bin/python3"; server_script; root; port_file; secret;
@@ -1294,6 +1300,31 @@ let amp_authenticated_git () =
               ("AMP_API_KEY", key); ("AMP_URL", Some ("https://127.0.0.1:" ^ port));
               ("POISON_AUTH", None) ]
           in
+          let local_variables () =
+            [ ("AMP_BIN_DIR", None); ("HOME", Some home);
+              ("AMP_API_KEY", None); ("AMP_URL", None);
+              ("POISON_AUTH", None); ("XDG_STATE_HOME", None) ]
+          in
+          let local_target =
+            if Sys.file_exists "/usr/bin/sw_vers" then "macos-arm64"
+            else "linux-x86_64"
+          in
+          let enroll_local ?state_home () =
+            let variables =
+              match state_home with
+              | None -> local_variables ()
+              | Some path ->
+                  ("XDG_STATE_HOME", Some path)
+                  :: List.remove_assoc "XDG_STATE_HOME" (local_variables ())
+            in
+            with_variables variables (fun () ->
+              command "/usr/bin/python3"
+                [ "-I";
+                  Filename.concat source_root "runtime/templates/runtime_metadata.py";
+                  "enroll-amp"; home; local_source; local_target; helper;
+                  "0.0.1789171288-gd95a61" ])
+          in
+          enroll_local ();
           Alcotest.(check bool) "exact Amp remote" true
             (Clamp.Sync.For_test.amp_remote "ampcode.com/@example/clamp"
                "https://ampcode.com/@example/clamp");
@@ -1303,6 +1334,9 @@ let amp_authenticated_git () =
           Alcotest.(check bool) "Amp lookalike rejected" false
             (Clamp.Sync.For_test.amp_remote "ampcode.com/@example/clamp"
                "https://ampcode.com.example/@example/clamp");
+          Alcotest.(check bool) "Git 2.50 array credential request" true
+            (Clamp.Sync.For_test.valid_credential_request
+               "capability[]=authtype\ncapability[]=state\nprotocol=https\nhost=ampcode.com\nwwwauth[]=Basic realm=fixture\nwwwauth[]=Bearer realm=fixture\n\n");
           with_variables
             [ ("AMP_BIN_DIR", Some bin); ("HOME", Some home);
               ("AMP_API_KEY", Some secret);
@@ -1333,6 +1367,7 @@ let amp_authenticated_git () =
                  environment);
             let output = check_ok "authenticated sanitized Git"
                 (Clamp.Sync.For_test.amp_git ~repo:clone ~remote
+                   ~source:local_source
                    ~arguments:(tls_arguments (fun remote ->
                        [ "fetch"; "--quiet"; "--no-auto-maintenance"; remote;
                          "+refs/heads/main:refs/remotes/auth-fixture/main" ]))
@@ -1348,6 +1383,197 @@ let amp_authenticated_git () =
             Alcotest.(check bool) "secret absent from Git output" false
               (try ignore (Str.search_forward (Str.regexp_string secret) output 0); true
                with Not_found -> false));
+          Sys.remove helper_marker;
+          with_variables (local_variables ()) (fun () ->
+            let selected_helper, environment =
+              check_ok "trusted local Amp environment"
+                (Clamp.Sync.For_test.trusted_amp_runtime ~source:local_source ())
+            in
+            Alcotest.(check string) "local helper exact path" helper selected_helper;
+            let names =
+              environment |> Array.to_list
+              |> List.map (fun entry ->
+                     match String.index_opt entry '=' with
+                     | Some index -> String.sub entry 0 index
+                     | None -> entry)
+              |> List.sort String.compare
+            in
+            Alcotest.(check (list string)) "local helper exact environment"
+              [ "GIT_CONFIG_GLOBAL"; "GIT_CONFIG_NOSYSTEM";
+                "GIT_TERMINAL_PROMPT"; "HOME"; "PATH" ] names;
+            let output =
+              check_ok "local authenticated sanitized Git"
+                (Clamp.Sync.For_test.amp_git ~repo:clone ~remote
+                   ~source:local_source
+                   ~arguments:(tls_arguments (fun remote ->
+                       [ "fetch"; "--quiet"; "--no-auto-maintenance"; remote;
+                         "+refs/heads/main:refs/remotes/local-auth/main" ]))
+                   ~maximum:4096 ~timeout:3.)
+            in
+            Alcotest.(check string) "local authenticated fetch output" "" output;
+            Alcotest.(check int) "local authenticated ref fetched" 40
+              (String.length
+                 (git_output clone [ "rev-parse"; "refs/remotes/local-auth/main" ]));
+            let proxy =
+              Filename.concat source_root "_build/default/bin/kb.exe"
+              |> Unix.realpath
+            in
+            let output =
+              check_ok "bounded local credential proxy"
+                (Clamp.Sync.For_test.amp_git_with_proxy ~proxy ~repo:clone ~remote
+                   ~source:local_source
+                   ~arguments:(tls_arguments (fun remote ->
+                       [ "ls-remote"; remote; "HEAD" ]))
+                   ~maximum:4096 ~timeout:3.)
+            in
+            Alcotest.(check bool) "proxy output excludes credential" false
+              (try
+                 ignore
+                   (Str.search_forward (Str.regexp_string secret) output 0);
+                 true
+               with Not_found -> false);
+            let explicit_state = Filename.concat root "explicit-state" in
+            Unix.mkdir explicit_state 0o700;
+            enroll_local ~state_home:explicit_state ();
+            remove (Filename.concat home ".local/state");
+            with_variables
+              (("XDG_STATE_HOME", Some explicit_state)
+               :: List.remove_assoc "XDG_STATE_HOME" (local_variables ()))
+              (fun () ->
+                ignore
+                  (check_ok "explicit XDG enrollment reaches proxy"
+                     (Clamp.Sync.For_test.amp_git_with_proxy ~proxy ~repo:clone
+                        ~remote ~source:local_source
+                        ~arguments:(tls_arguments (fun remote ->
+                            [ "ls-remote"; remote; "HEAD" ]))
+                        ~maximum:4096 ~timeout:3.)));
+            enroll_local ();
+            write (Filename.concat clone "local-only") "local\n";
+            git clone [ "add"; "local-only" ];
+            git clone [ "commit"; "--quiet"; "-m"; "local" ];
+            write (Filename.concat source "remote-only") "remote\n";
+            git source [ "add"; "remote-only" ];
+            git source [ "commit"; "--quiet"; "-m"; "remote" ];
+            git source [ "push"; "--quiet"; bare; "main:main" ];
+            let rejected =
+              check_ok "authenticated non-fast-forward remains a Git status"
+                (Clamp.Sync.For_test.remote_git_status ~proxy ~repo:clone ~remote
+                   ~source:local_source
+                   ~arguments:(tls_arguments (fun remote ->
+                       [ "push"; "--porcelain"; "--no-verify"; remote;
+                         "HEAD:refs/heads/main" ]))
+                   ~maximum:4096 ~timeout:3.)
+            in
+            Alcotest.(check bool) "non-fast-forward rejected" false
+              rejected.succeeded;
+            write_helper "store-error";
+            enroll_local ();
+            let pushed =
+              check_ok "successful push ignores credential store failure"
+                (Clamp.Sync.For_test.remote_git_status ~proxy ~repo:clone ~remote
+                   ~source:local_source
+                   ~arguments:(tls_arguments (fun remote ->
+                       [ "push"; "--porcelain"; "--no-verify"; remote;
+                         "HEAD:refs/heads/store-success" ]))
+                   ~maximum:4096 ~timeout:3.)
+            in
+            Alcotest.(check bool) "push succeeded" true pushed.succeeded;
+            Alcotest.(check string) "successful remote SHA"
+              (git_output clone [ "rev-parse"; "HEAD" ])
+              (git_output bare [ "rev-parse"; "refs/heads/store-success" ]);
+            write_helper "ok";
+            enroll_local ());
+          Alcotest.(check bool) "local trusted helper ran" true
+            (Sys.file_exists helper_marker);
+          Sys.remove helper_marker;
+          write_helper "error";
+          with_variables (local_variables ()) (fun () ->
+            check_ok "non-Amp remote does not receive local credentials"
+              (Clamp.Sync.Git.fetch_origin_main clone "local.test/fixture" 4096));
+          Alcotest.(check bool) "non-Amp remote skipped Amp helper" false
+            (Sys.file_exists helper_marker);
+          write_helper "ok";
+          with_variables
+            [ ("AMP_BIN_DIR", Some bin); ("HOME", Some home);
+              ("AMP_API_KEY", None); ("AMP_URL", None) ]
+            (fun () ->
+              check_error "partial Orb context is not local" "git_auth_unavailable"
+                (Clamp.Sync.For_test.trusted_amp_runtime ~source:local_source ()));
+          Unix.chmod runtime 0o777;
+          with_variables (local_variables ()) (fun () ->
+            check_error "unsafe local Amp parent" "local_amp_installation_unsafe"
+              (Clamp.Sync.For_test.trusted_amp_runtime ~source:local_source ()));
+          Unix.chmod runtime 0o700;
+          write_helper "malformed";
+          with_variables (local_variables ()) (fun () ->
+            check_error "changed local Amp" "local_amp_changed"
+              (Clamp.Sync.For_test.trusted_amp_runtime ~source:local_source ()));
+          enroll_local ();
+          with_variables (local_variables ()) (fun () ->
+            check_error "malformed local helper" "local_amp_login_required"
+              (Clamp.Sync.For_test.amp_git ~repo:clone ~remote
+                 ~source:local_source
+                 ~arguments:(tls_arguments (fun remote -> [ "ls-remote"; remote ]))
+                 ~maximum:4096 ~timeout:2.));
+          List.iter
+            (fun (mode, code, maximum) ->
+              Sys.remove helper_marker;
+              write_helper mode;
+              enroll_local ();
+              with_variables (local_variables ()) (fun () ->
+                check_error ("local helper " ^ mode) code
+                  (Clamp.Sync.For_test.amp_git ~repo:clone ~remote
+                     ~source:local_source
+                     ~arguments:(tls_arguments (fun remote ->
+                         [ "ls-remote"; remote ]))
+                     ~maximum ~timeout:0.2));
+              let helper_pid = int_of_string (String.trim (read helper_marker)) in
+              Alcotest.(check bool) ("local " ^ mode ^ " helper reaped") true
+                (await_process_exit helper_pid))
+            [ ("hang", "local_amp_helper_timeout", 4096);
+              ("error", "local_amp_login_required", 4096);
+              ("output", "local_amp_helper_protocol_invalid", 128) ];
+          let proxy =
+            Filename.concat source_root "_build/default/bin/kb.exe"
+            |> Unix.realpath
+          in
+          List.iter
+            (fun (mode, code) ->
+              Sys.remove helper_marker;
+              if Sys.file_exists descendant_marker then Sys.remove descendant_marker;
+              write_helper mode;
+              enroll_local ();
+              with_variables (local_variables ()) (fun () ->
+                check_error ("bounded proxy " ^ mode) code
+                  (Clamp.Sync.For_test.remote_git_status ~proxy ~repo:clone
+                     ~remote ~source:local_source
+                     ~arguments:(tls_arguments (fun remote ->
+                         [ "ls-remote"; remote; "HEAD" ]))
+                     ~maximum:4096
+                     ~timeout:(if mode = "hang-outer" then 0.2 else 7.)));
+              let helper_pid = int_of_string (String.trim (read helper_marker)) in
+              Alcotest.(check bool) ("bounded proxy " ^ mode ^ " reaped") true
+                (await_process_exit helper_pid);
+              Alcotest.(check bool) ("bounded proxy " ^ mode ^ " link cleanup")
+                false
+                (Sys.readdir bin |> Array.exists
+                   (String.starts_with ~prefix:".clamp-exec-"));
+              (if String.starts_with ~prefix:"fork-" mode then begin
+                let descendant_pid =
+                  int_of_string (String.trim (read descendant_marker))
+                in
+                Alcotest.(check bool) ("bounded proxy " ^ mode ^ " descendant reaped")
+                  true (await_process_exit descendant_pid)
+              end))
+            [ ("hang-outer", "local_amp_helper_timeout");
+              ("hang-inner", "local_amp_helper_timeout");
+              ("error", "local_amp_login_required");
+              ("fork-open", "local_amp_helper_timeout");
+              ("fork-closed", "local_amp_login_required");
+              ("malformed", "local_amp_helper_protocol_invalid");
+              ("output", "local_amp_helper_protocol_invalid") ];
+          write_helper "ok";
+          enroll_local ();
           let ordinary_xdg =
             check_ok "ordinary sanitized XDG"
               (Clamp.Sync.For_test.run_process ~program:"/usr/bin/printenv"
@@ -1368,18 +1594,29 @@ let amp_authenticated_git () =
           with_variables (variables ()) (fun () ->
             check_error "repository hostile helper" "git_auth_config_unsafe"
               (Clamp.Sync.For_test.amp_git ~repo:clone ~remote
+                 ~source:local_source
                  ~arguments:(tls_arguments (fun remote -> [ "ls-remote"; remote ]))
                  ~maximum:4096 ~timeout:1.));
           Alcotest.(check bool) "repository hostile helper did not execute" false
             (Sys.file_exists hostile_marker);
           git clone [ "config"; "--unset-all"; "credential.helper" ];
+          git clone [ "config"; "extensions.worktreeConfig"; "true" ];
+          with_variables (local_variables ()) (fun () ->
+            check_error "worktree config extension" "git_auth_config_unsafe"
+              (Clamp.Sync.For_test.amp_git ~repo:clone ~remote
+                 ~source:local_source
+                 ~arguments:(tls_arguments (fun remote -> [ "ls-remote"; remote ]))
+                 ~maximum:4096 ~timeout:1.));
+          git clone [ "config"; "--unset-all"; "extensions.worktreeConfig" ];
           with_variables (variables ~key:None ()) (fun () ->
             check_error "missing Amp auth" "git_auth_unavailable"
               (Clamp.Sync.For_test.amp_git ~repo:clone ~remote
+                 ~source:local_source
                  ~arguments:(tls_arguments (fun remote -> [ "ls-remote"; remote ]))
                  ~maximum:4096 ~timeout:1.));
           with_variables (variables ~key:(Some (secret ^ "-invalid")) ()) (fun () ->
             match Clamp.Sync.For_test.amp_git ~repo:clone ~remote
+                    ~source:local_source
                     ~arguments:(tls_arguments (fun remote -> [ "ls-remote"; remote ]))
                     ~maximum:4096 ~timeout:2. with
             | Error failure ->
@@ -1395,6 +1632,7 @@ let amp_authenticated_git () =
               with_variables (variables ()) (fun () ->
                 check_error ("helper " ^ mode) code
                   (Clamp.Sync.For_test.amp_git ~repo:clone ~remote
+                     ~source:local_source
                      ~arguments:(tls_arguments (fun remote -> [ "ls-remote"; remote ]))
                      ~maximum ~timeout:0.2));
               let helper_pid = int_of_string (String.trim (read helper_marker)) in

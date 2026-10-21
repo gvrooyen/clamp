@@ -14,9 +14,10 @@ done.
 
 Release 0.2.0 Phase 4 is repository-complete: its portable launcher, local
 runtime installer, exact-0.1.4 scaffold migration, Linux checks, native macOS
-checks, and Oracle review passed. It is not yet a published or supported local
-workflow; trusted local Amp authentication, end-to-end qualification, and
-release/operator gates remain pending.
+checks, and Oracle review passed. Phase 5 local Amp authentication is implemented
+in source with Linux fixture coverage and Oracle review, but native real-clone
+qualification is pending. The 0.2 workflow is not yet published or supported;
+Phase 6 end-to-end qualification and release/operator gates remain pending.
 
 Native Apple-silicon macOS development builds and unsigned verification
 packages are available from source; they are not a supported production

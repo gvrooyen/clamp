@@ -1604,7 +1604,7 @@ let push_failure_and_stale_index () =
       let sync _ =
         Error
           { Clamp.Sync.kind = Transient; code = "fixture_index_failed";
-            message = "Index unavailable."; diagnostics = [] }
+            message = "Index unavailable."; details = []; diagnostics = [] }
       in
       let error =
         check_error "stale index" "publish_complete_index_stale"
@@ -1630,7 +1630,7 @@ let push_failure_and_stale_index () =
         else
           Error
             { Clamp.Sync.kind = Validation; code = "sync_target_mismatch";
-              message = "Target advanced."; diagnostics = [] }
+              message = "Target advanced."; details = []; diagnostics = [] }
       in
       let error =
         check_error "advanced stale" "publish_complete_index_stale"
@@ -1729,7 +1729,8 @@ let state_atomicity_and_cleanup () =
       let sync _ =
         Error
           { Clamp.Sync.kind = Transient; code = "fixture_index_failed";
-            message = "Index unavailable."; diagnostics = [ diagnostic ] }
+            message = "Index unavailable."; details = [];
+            diagnostics = [ diagnostic ] }
       in
       let error =
         Fun.protect ~finally:restore_state_directory (fun () ->
@@ -1884,6 +1885,20 @@ let cli_contract () =
         (json |> member "details" |> member "paths" |> to_list
          |> List.map to_string))
 
+let local_auth_detail_contract () =
+  let error : Clamp.Publication.error =
+    { kind = Clamp.Publication.Authentication;
+      code = "local_amp_helper_protocol_invalid";
+      message = "The local Amp credential helper response was invalid.";
+      published = false; preserved = false; preservation_pending = false;
+      cleanup_pending = false; commit = None; branch = None; paths = [];
+      cause = None; cleanup_cause = None;
+      details = [ ("cause", `String "value") ]; diagnostics = [] }
+  in
+  Alcotest.(check string) "pre-push local detail shape"
+    "{\"cause\":\"value\"}"
+    (Clamp.Publication.error_details error |> Yojson.Safe.to_string)
+
 let () =
   Alcotest.run "Phase 7 safe Git publication"
     [ ( "publication",
@@ -1923,5 +1938,7 @@ let () =
             state_atomicity_and_cleanup;
           Alcotest.test_case "thread and author contract" `Quick
             validation_and_author_contract;
+          Alcotest.test_case "local authentication detail contract" `Quick
+            local_auth_detail_contract;
           Alcotest.test_case "CLI JSON and human contract" `Quick
             cli_contract ] ) ]

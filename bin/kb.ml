@@ -1093,6 +1093,11 @@ let inspect_fallback_argv argv =
          :: (List.rev !regular @ List.rev !common_arguments @ suffix)) }
 
 let () =
+  if Array.length Sys.argv = 5
+     && Sys.argv.(1) = "__clamp-credential-helper" then
+    exit
+      (Clamp.Sync.credential_helper ~source:Sys.argv.(2)
+         ~pinned:Sys.argv.(3) ~operation:Sys.argv.(4));
   if Array.length Sys.argv = 2 && Sys.argv.(1) = "--version" then begin
     print_endline version;
     exit (Clamp.Exit_class.code Success)

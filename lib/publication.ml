@@ -19,6 +19,7 @@ type error = {
   paths : string list;
   cause : string option;
   cleanup_cause : string option;
+  details : (string * Yojson.Safe.t) list;
   diagnostics : Diagnostic.t list;
 }
 
@@ -46,11 +47,12 @@ let maximum_git_output = 16 * 1024 * 1024
 let ( let* ) = Result.bind
 
 let failure ?commit ?branch ?cause ?cleanup_cause ?(paths = [])
-    ?(diagnostics = []) ?(published = false) ?(preserved = false)
+    ?(details = []) ?(diagnostics = []) ?(published = false) ?(preserved = false)
     ?(preservation_pending = false) ?(cleanup_pending = false) kind code message =
   Error
     { kind; code; message; published; preserved; preservation_pending;
-      cleanup_pending; commit; branch; paths; cause; cleanup_cause; diagnostics }
+      cleanup_pending; commit; branch; paths; cause; cleanup_cause; details;
+      diagnostics }
 
 let exit_class error =
   match error.kind with
@@ -66,8 +68,17 @@ let error_details error =
     | None -> []
     | Some value -> [ (name, convert value) ]
   in
+  let direct_local_authentication =
+    String.starts_with ~prefix:"local_amp_" error.code
+    && not error.published && not error.preserved
+    && not error.preservation_pending && not error.cleanup_pending
+    && error.commit = None && error.branch = None && error.paths = []
+    && error.cause = None && error.cleanup_cause = None
+  in
   `Assoc
-    ([ ("published", `Bool error.published) ]
+    (error.details
+     @ (if direct_local_authentication then []
+        else [ ("published", `Bool error.published) ])
      @ (if error.preserved then
           [ ("preserved", `Bool true);
             ("cleanup_pending", `Bool error.cleanup_pending) ]
@@ -99,7 +110,7 @@ let of_sync (error : Sync.error) =
   { kind; code = error.code; message = error.message; published = false;
     preserved = false; preservation_pending = false; cleanup_pending = false;
     commit = None; branch = None; paths = []; cause = None; cleanup_cause = None;
-    diagnostics = error.diagnostics }
+    details = error.details; diagnostics = error.diagnostics }
 
 let of_local (error : Local.error) =
   let kind =
@@ -108,7 +119,7 @@ let of_local (error : Local.error) =
   { kind; code = error.code; message = error.message; published = false;
     preserved = false; preservation_pending = false; cleanup_pending = false;
     commit = None; branch = None; paths = []; cause = None;
-    cleanup_cause = None; diagnostics = [] }
+    cleanup_cause = None; details = []; diagnostics = [] }
 
 let valid_thread_id value =
   let hyphens = [ 10; 15; 20; 25 ] in

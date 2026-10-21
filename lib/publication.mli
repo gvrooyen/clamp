@@ -19,6 +19,7 @@ type error = {
   paths : string list;
   cause : string option;
   cleanup_cause : string option;
+  details : (string * Yojson.Safe.t) list;
   diagnostics : Diagnostic.t list;
 }
 

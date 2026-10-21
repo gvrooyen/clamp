@@ -18,6 +18,7 @@ type error = {
   kind : error_kind;
   code : string;
   message : string;
+  details : (string * Yojson.Safe.t) list;
   diagnostics : Diagnostic.t list;
 }
 
@@ -33,8 +34,11 @@ val exit_class : error -> Exit_class.t
 val cli_result : error -> Cli_result.t
 val fallback_producers : unit -> (string * error_kind) list
 val fallback_error : code:string -> message:string -> error
+val fallback_error_with_details :
+  code:string -> message:string -> details:(string * Yojson.Safe.t) list -> error
 val preflight_repository : string -> (unit, error) result
 val completion_code : report -> string
+val credential_helper : source:string -> pinned:string -> operation:string -> int
 val local_origin_main : ?timeout:float -> string -> (string, error) result
 val local_config_at_commit : string -> string -> (string, error) result
 
@@ -97,11 +101,22 @@ module For_test : sig
     (string * Unix.process_status, error) result
 
   val parse_knowledge_root : string -> (unit, error) result
-  val trusted_amp_runtime : unit -> (string * string array, error) result
+  val trusted_amp_runtime :
+    ?source:string -> unit -> (string * string array, error) result
   val amp_remote : string -> string -> bool
+  val valid_credential_request : string -> bool
   val amp_git :
-    repo:string -> remote:string -> arguments:(string -> string list) ->
+    repo:string -> source:string -> remote:string ->
+    arguments:(string -> string list) ->
     maximum:int -> timeout:float -> (string, error) result
+  val amp_git_with_proxy :
+    proxy:string -> repo:string -> source:string -> remote:string ->
+    arguments:(string -> string list) ->
+    maximum:int -> timeout:float -> (string, error) result
+  val remote_git_status :
+    proxy:string -> repo:string -> source:string -> remote:string ->
+    arguments:(string -> string list) -> maximum:int -> timeout:float ->
+    (Git.command_result, error) result
   val local_origin_main_with_hooks :
     repo:string -> timeout:float -> child_setup_delay:float ->
     after_fork:(int -> unit) -> (string, error) result

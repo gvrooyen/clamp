@@ -8,11 +8,15 @@ import platform
 import re
 import selectors
 import secrets
+import select
+import signal
 import shlex
 import stat
 import subprocess
 import sys
 import tarfile
+from contextlib import contextmanager
+from datetime import datetime, timezone
 
 MAX_LOCK = 8192
 MAX_MANIFEST = 1024 * 1024
@@ -294,8 +298,24 @@ def local_preflight(target, repository):
     print("ok", target, sep="\n")
 
 
+def verify_trusted_chain(path):
+    if not os.path.isabs(path) or os.path.realpath(path) != path:
+        fail("unsafe Amp parent")
+    current = path
+    while current != os.path.dirname(current):
+        observed = os.lstat(current)
+        sticky_root = (observed.st_uid == 0 and observed.st_mode & stat.S_ISVTX)
+        if (not stat.S_ISDIR(observed.st_mode)
+                or observed.st_uid not in (0, os.geteuid())
+                or (observed.st_mode & 0o022 and not sticky_root)):
+            fail("unsafe Amp parent")
+        current = os.path.dirname(current)
+
+
 def verify_amp(home, executable):
-    home = os.path.realpath(home)
+    if not os.path.isabs(home) or os.path.realpath(home) != home:
+        fail("unsafe Amp parent")
+    verify_trusted_chain(home)
     expected = os.path.join(home, ".amp", "bin", "amp")
     if executable != expected:
         fail("unexpected Amp executable")
@@ -312,24 +332,236 @@ def verify_amp(home, executable):
         fail("unsafe Amp executable")
 
 
-def verify_amp_version(observed):
+def amp_version_result(observed):
     match = re.search(r"(?:^|\s)(0\.0\.([0-9]+)-g[0-9a-f]+)(?:\s|$)", observed)
     if match is None or len(match.group(1).encode()) > 64:
-        print("invalid")
+        return "invalid", None
     elif int(match.group(2)) < 1789113641:
-        print("unsupported", match.group(1), sep="\n")
+        return "unsupported", match.group(1)
     else:
-        print("ok", match.group(1), sep="\n")
+        return "ok", match.group(1)
 
 
-def bounded_output(arguments, environment, maximum=4096, timeout=5):
-    process = subprocess.Popen(arguments, env=environment, stdin=subprocess.DEVNULL,
-                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+def verify_amp_version(observed):
+    status, version = amp_version_result(observed)
+    if version is None:
+        print(status)
+    else:
+        print(status, version, sep="\n")
+
+
+def amp_digest(executable):
+    before = os.lstat(executable)
+    if not stat.S_ISREG(before.st_mode) or before.st_size > 256 * 1024 * 1024:
+        fail("unsafe Amp executable")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(executable, flags)
+    digest = hashlib.sha256()
+    try:
+        opened = os.fstat(descriptor)
+        if (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns) != (
+                before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns):
+            fail("Amp executable changed")
+        while True:
+            chunk = os.read(descriptor, 65536)
+            if not chunk:
+                break
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+        if (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns) != (
+                opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns):
+            fail("Amp executable changed")
+        return opened, digest.hexdigest()
+    finally:
+        os.close(descriptor)
+
+
+def open_amp(executable):
+    before = os.lstat(executable)
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(executable, flags)
+    opened = os.fstat(descriptor)
+    if ((opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns) !=
+            (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+            or not stat.S_ISREG(opened.st_mode)
+            or opened.st_size > 256 * 1024 * 1024):
+        os.close(descriptor)
+        fail("Amp executable changed")
+    return descriptor
+
+
+def amp_digest_descriptor(descriptor):
+    opened = os.fstat(descriptor)
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    digest = hashlib.sha256()
+    remaining = opened.st_size
+    while remaining:
+        chunk = os.read(descriptor, min(65536, remaining))
+        if not chunk:
+            fail("Amp executable changed")
+        digest.update(chunk)
+        remaining -= len(chunk)
+    after = os.fstat(descriptor)
+    if ((after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns) !=
+            (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)):
+        fail("Amp executable changed")
+    return opened, digest.hexdigest()
+
+
+@contextmanager
+def pinned_amp_path(executable, descriptor):
+    parent = os.path.dirname(executable)
+    directory = os.path.join(parent, ".clamp-exec-" + secrets.token_hex(16))
+    linked = os.path.join(directory, "amp")
+    os.mkdir(directory, 0o700)
+    try:
+        os.link(executable, linked)
+        retained = os.fstat(descriptor)
+        observed = os.lstat(linked)
+        if ((retained.st_dev, retained.st_ino, retained.st_size) !=
+                (observed.st_dev, observed.st_ino, observed.st_size)
+                or not stat.S_ISREG(observed.st_mode)):
+            fail("Amp executable changed")
+        yield linked
+    finally:
+        if os.path.lexists(linked):
+            os.unlink(linked)
+        os.rmdir(directory)
+
+
+def enroll_amp(home, source, target, executable, version, expected=None):
+    verify_amp(home, executable)
+    if (not SOURCE.fullmatch(source) or not source.startswith("ampcode.com/git/@")
+            or target not in TARGETS
+            or re.fullmatch(r"0\.0\.[0-9]+-g[0-9a-f]+", version) is None):
+        fail("invalid Amp enrollment identity")
+    state_home = os.environ.get("XDG_STATE_HOME")
+    if state_home is not None:
+        if (not os.path.isabs(state_home) or os.path.realpath(state_home) != state_home):
+            fail("unsafe state directory")
+        verify_trusted_chain(state_home)
+        observed = os.lstat(state_home)
+        if (not stat.S_ISDIR(observed.st_mode) or observed.st_uid != os.geteuid()
+                or observed.st_mode & 0o022):
+            fail("unsafe state directory")
+    else:
+        state_home = os.path.join(os.path.realpath(home), ".local", "state")
+        private_directories(home, os.path.dirname(state_home), state_home)
+    source_digest = hashlib.sha256(source.encode()).hexdigest()
+    clamp_root = os.path.join(state_home, "clamp")
+    repositories = os.path.join(clamp_root, "repositories")
+    repository = os.path.join(repositories, source_digest)
+    if os.path.commonpath((state_home, repository)) != state_home:
+        fail("unsafe state directory")
+    current = state_home
+    for path in (clamp_root, repositories, repository):
+        if os.path.dirname(path) != current:
+            fail("unsafe state directory")
+        try:
+            observed = os.lstat(path)
+        except FileNotFoundError:
+            os.mkdir(path, 0o700)
+            observed = os.lstat(path)
+        if (not stat.S_ISDIR(observed.st_mode) or observed.st_uid != os.geteuid()
+                or observed.st_mode & 0o077):
+            fail("unsafe state directory")
+        current = path
+    executable_stat, executable_digest = amp_digest(executable)
+    if expected is not None:
+        expected_stat, expected_digest = expected
+        if ((executable_stat.st_dev, executable_stat.st_ino,
+             executable_stat.st_size) !=
+                (expected_stat.st_dev, expected_stat.st_ino,
+                 expected_stat.st_size)
+                or executable_digest != expected_digest):
+            fail("Amp executable changed")
+    record = {
+        "amp_device": executable_stat.st_dev,
+        "amp_inode": executable_stat.st_ino,
+        "amp_path": executable,
+        "amp_sha256": executable_digest,
+        "amp_size": executable_stat.st_size,
+        "amp_version": version,
+        "qualified_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "schema_version": 1,
+        "source_repository": source,
+        "target": target,
+    }
+    destination = os.path.join(repository, "local.json")
+    destination_identity = None
+    if os.path.lexists(destination):
+        observed = os.lstat(destination)
+        if (not stat.S_ISREG(observed.st_mode) or observed.st_uid != os.geteuid()
+                or observed.st_mode & 0o077):
+            fail("unsafe Amp enrollment")
+        destination_identity = (observed.st_dev, observed.st_ino, observed.st_size,
+                                observed.st_mtime_ns)
+    temporary = os.path.join(repository, ".enrollment-" + secrets.token_hex(16))
+    raw = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            offset = 0
+            while offset < len(raw):
+                written = os.write(descriptor, raw[offset:])
+                if written == 0:
+                    fail("Amp enrollment write failed")
+                offset += written
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        replaced = False
+        try:
+            verify_amp(home, executable)
+            final_stat, final_digest = amp_digest(executable)
+            if ((final_stat.st_dev, final_stat.st_ino, final_stat.st_size) !=
+                    (record["amp_device"], record["amp_inode"], record["amp_size"])
+                    or final_digest != record["amp_sha256"]):
+                fail("Amp executable changed")
+            current = None
+            if os.path.lexists(destination):
+                observed = os.lstat(destination)
+                current = (observed.st_dev, observed.st_ino, observed.st_size,
+                           observed.st_mtime_ns)
+            if current != destination_identity:
+                fail("unsafe Amp enrollment")
+            os.replace(temporary, destination)
+            replaced = True
+            directory = os.open(repository, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        except SystemExit:
+            raise
+        except OSError:
+            if replaced:
+                fail("Amp enrollment durability uncertain")
+            fail("Amp enrollment write failed")
+    except OSError:
+        fail("Amp enrollment write failed")
+    finally:
+        if os.path.lexists(temporary):
+            os.unlink(temporary)
+
+
+def bounded_output(arguments, environment, maximum=4096, timeout=5,
+                   pass_fds=(), executable=None, input_data=None, new_session=True):
+    process = subprocess.Popen(arguments, env=environment,
+                               stdin=(subprocess.DEVNULL if input_data is None
+                                      else subprocess.PIPE),
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               pass_fds=pass_fds, executable=executable,
+                               start_new_session=new_session)
     selector = selectors.DefaultSelector()
     selector.register(process.stdout, selectors.EVENT_READ)
+    input_offset = 0
+    if input_data is not None:
+        selector.register(process.stdin, selectors.EVENT_WRITE)
     output = bytearray()
     import time
     deadline = time.monotonic() + timeout
+    group_cleaned = False
     try:
         while True:
             remaining = deadline - time.monotonic()
@@ -338,12 +570,62 @@ def bounded_output(arguments, environment, maximum=4096, timeout=5):
             events = selector.select(remaining)
             if not events:
                 fail("command timeout")
-            chunk = os.read(process.stdout.fileno(), 4096)
-            if not chunk:
+            for key, mask in events:
+                if key.fileobj is process.stdout:
+                    chunk = os.read(process.stdout.fileno(), 4096)
+                    if not chunk:
+                        selector.unregister(process.stdout)
+                        if input_data is None or process.stdin.closed:
+                            events = []
+                            break
+                    else:
+                        output.extend(chunk)
+                        if len(output) > maximum:
+                            fail("command output too large")
+                elif key.fileobj is process.stdin and mask & selectors.EVENT_WRITE:
+                    try:
+                        written = os.write(process.stdin.fileno(),
+                                           input_data[input_offset:input_offset + 4096])
+                        input_offset += written
+                        if input_offset == len(input_data):
+                            selector.unregister(process.stdin)
+                            process.stdin.close()
+                    except BrokenPipeError:
+                        selector.unregister(process.stdin)
+                        process.stdin.close()
+            if not selector.get_map() or (process.stdout not in
+                                           [key.fileobj for key in selector.get_map().values()]):
                 break
-            output.extend(chunk)
-            if len(output) > maximum:
-                fail("command output too large")
+        if new_session:
+            if hasattr(os, "waitid"):
+                while True:
+                    information = os.waitid(os.P_PID, process.pid,
+                                            os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                    if information is not None:
+                        break
+                    if time.monotonic() >= deadline:
+                        fail("command timeout")
+                    time.sleep(min(0.01, deadline - time.monotonic()))
+            elif sys.platform == "darwin" and hasattr(select, "kqueue"):
+                queue = select.kqueue()
+                try:
+                    event = select.kevent(
+                        process.pid, filter=select.KQ_FILTER_PROC,
+                        flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
+                        fflags=select.KQ_NOTE_EXIT)
+                    events = queue.control(
+                        [event], 1, max(0., deadline - time.monotonic()))
+                    if not events:
+                        fail("command timeout")
+                finally:
+                    queue.close()
+            else:
+                fail("command exit probe unavailable")
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            group_cleaned = True
         if process.wait(timeout=max(0.1, deadline - time.monotonic())) != 0:
             fail("command failed")
         return output.decode("utf-8", "strict")
@@ -351,36 +633,136 @@ def bounded_output(arguments, environment, maximum=4096, timeout=5):
         fail("command output invalid")
     finally:
         selector.close()
-        if process.poll() is None:
+        if new_session and not group_cleaned:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        elif process.poll() is None:
             process.kill()
+        if process.poll() is None:
             process.wait()
 
 
 def run_amp_version(home, executable):
     verify_amp(home, executable)
-    output = bounded_output([executable, "--version"],
-                            {"HOME": home, "PATH": "/usr/bin:/bin"})
-    verify_amp_version(output)
+    descriptor = open_amp(executable)
+    try:
+        with pinned_amp_path(executable, descriptor) as pinned:
+            output = bounded_output([executable, "--version"],
+                                    {"HOME": home, "PATH": "/usr/bin:/bin"},
+                                    executable=pinned)
+        verify_amp_version(output)
+    finally:
+        os.close(descriptor)
 
 
-def check_amp_remote(home, executable, repository, origin):
+def valid_credential_protocol(contents, response):
+    if b"\0" in contents or b"\r" in contents:
+        return False
+    try:
+        lines = contents.decode("utf-8", "strict").split("\n")
+    except UnicodeDecodeError:
+        return False
+    allowed = ({"username", "password", "password_expiry_utc", "oauth_refresh_token"}
+               if response else
+               {"url", "protocol", "host", "path", "username", "password",
+                "password_expiry_utc", "oauth_refresh_token", "capability[]",
+                "wwwauth[]", "state[]"})
+    repeated = {"capability[]", "wwwauth[]", "state[]"}
+    observed = set()
+    for index, line in enumerate(lines):
+        if line == "":
+            if any(rest != "" for rest in lines[index:]):
+                return False
+            break
+        if "=" not in line:
+            return False
+        key, value = line.split("=", 1)
+        if key not in allowed or (key in observed and key not in repeated) or value == "":
+            return False
+        observed.add(key)
+    return not response or {"username", "password"}.issubset(observed)
+
+
+def setup_credential_helper(executable, operation):
+    if operation not in ("get", "store", "erase"):
+        fail("credential protocol invalid")
+    request = sys.stdin.buffer.read(65537)
+    if len(request) > 65536 or not valid_credential_protocol(request, False):
+        fail("credential protocol invalid")
+    output = bounded_output(
+        [executable, "git-credential-helper", operation],
+        {"HOME": os.environ["HOME"], "PATH": "/usr/bin:/bin",
+         "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
+         "GIT_TERMINAL_PROMPT": "0"},
+        maximum=65536, timeout=5, executable=executable, input_data=request,
+        new_session=False)
+    raw = output.encode()
+    if ((operation == "get" and not valid_credential_protocol(raw, True))
+            or (operation != "get" and output.strip() != "")):
+        fail("credential protocol invalid")
+    sys.stdout.write(output)
+
+
+def check_amp_remote(home, executable, repository, origin, descriptor=None, emit=True):
     verify_amp(home, executable)
+    if descriptor is None:
+        descriptor = open_amp(executable)
+        try:
+            return check_amp_remote(home, executable, repository, origin,
+                                    descriptor, emit)
+        finally:
+            os.close(descriptor)
     repository = os.path.realpath(repository)
     if not origin.startswith("https://ampcode.com/git/@") or "\n" in origin:
         fail("invalid Amp origin")
-    helper = "!" + shlex.quote(executable) + " git-credential-helper"
     environment = {
         "HOME": home, "PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_TERMINAL_PROMPT": "0",
-        "GIT_ASKPASS": "/bin/false", "SSH_ASKPASS": "/bin/false",
     }
-    bounded_output([
-        "/usr/bin/git", "-C", repository,
-        "-c", "credential.helper=", "-c", "credential.helper=" + helper,
-        "-c", "credential.useHttpPath=false", "-c", "core.hooksPath=/dev/null",
-        "ls-remote", "--exit-code", origin, "HEAD",
-    ], environment, maximum=4096, timeout=10)
-    print("ok")
+    # A private hard link binds Git's helper invocation to the retained inode
+    # using an executable pathname accepted by both Linux and Darwin.
+    with pinned_amp_path(executable, descriptor) as pinned:
+        helper = "!" + " ".join(
+            shlex.quote(value) for value in
+            ("/usr/bin/python3", "-I", os.path.realpath(__file__),
+             "credential-helper", pinned))
+        bounded_output([
+              "/usr/bin/git", "-C", repository,
+              "-c", "credential.helper=", "-c", "credential.helper=" + helper,
+              "-c", "credential.https://ampcode.com.useHttpPath=true",
+              "-c", "core.hooksPath=/dev/null", "-c", "core.askPass=/bin/false",
+              "-c", "credential.interactive=false",
+              "ls-remote", "--exit-code", origin, "HEAD",
+          ], environment, maximum=4096, timeout=10)
+    if emit:
+        print("ok")
+
+
+def qualify_amp(home, executable, repository, origin, source, target):
+    verify_amp(home, executable)
+    descriptor = open_amp(executable)
+    try:
+        environment = {"HOME": home, "PATH": "/usr/bin:/bin"}
+        with pinned_amp_path(executable, descriptor) as pinned:
+            output = bounded_output([executable, "--version"], environment,
+                                    executable=pinned)
+        status, version = amp_version_result(output)
+        if status != "ok":
+            fail("unsupported Amp version" if status == "unsupported"
+                 else "invalid Amp version")
+        check_amp_remote(home, executable, repository, origin, descriptor, emit=False)
+        identity, digest = amp_digest_descriptor(descriptor)
+        current, current_digest = amp_digest(executable)
+        if ((identity.st_dev, identity.st_ino, identity.st_size) !=
+                (current.st_dev, current.st_ino, current.st_size)
+                or digest != current_digest):
+            fail("Amp executable changed")
+        enroll_amp(home, source, target, executable, version,
+                   expected=(identity, digest))
+    finally:
+        os.close(descriptor)
 
 
 def archive_entries(archive, version, revision, root, maximum, *required_files):
@@ -620,6 +1002,12 @@ elif len(sys.argv) == 4 and sys.argv[1] == "amp-version-exec":
     run_amp_version(sys.argv[2], sys.argv[3])
 elif len(sys.argv) == 6 and sys.argv[1] == "amp-ready":
     check_amp_remote(*sys.argv[2:])
+elif len(sys.argv) == 8 and sys.argv[1] == "qualify-amp":
+    qualify_amp(*sys.argv[2:])
+elif len(sys.argv) == 4 and sys.argv[1] == "credential-helper":
+    setup_credential_helper(sys.argv[2], sys.argv[3])
+elif len(sys.argv) == 7 and sys.argv[1] == "enroll-amp":
+    enroll_amp(*sys.argv[2:])
 elif len(sys.argv) >= 9 and sys.argv[1] == "extract":
     extract_archive(*sys.argv[2:])
 elif len(sys.argv) >= 4 and sys.argv[1] == "private-dirs":

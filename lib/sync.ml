@@ -19,6 +19,7 @@ type error = {
   kind : error_kind;
   code : string;
   message : string;
+  details : (string * Yojson.Safe.t) list;
   diagnostics : Diagnostic.t list;
 }
 
@@ -69,6 +70,22 @@ let classified_producers =
       producer_kind = Transient; sync_fallback = true };
     { producer_code = "git_target_invalid";
       producer_kind = Transient; sync_fallback = true };
+    { producer_code = "local_amp_missing";
+      producer_kind = Authentication; sync_fallback = true };
+    { producer_code = "local_amp_version_unsupported";
+      producer_kind = Authentication; sync_fallback = true };
+    { producer_code = "local_amp_installation_unsafe";
+      producer_kind = Authentication; sync_fallback = true };
+    { producer_code = "local_amp_changed";
+      producer_kind = Authentication; sync_fallback = true };
+    { producer_code = "local_amp_login_required";
+      producer_kind = Authentication; sync_fallback = true };
+    { producer_code = "local_amp_helper_protocol_invalid";
+      producer_kind = Authentication; sync_fallback = true };
+    { producer_code = "local_amp_helper_timeout";
+      producer_kind = Transient; sync_fallback = true };
+    { producer_code = "local_amp_remote_unavailable";
+      producer_kind = Transient; sync_fallback = true };
     { producer_code = "sync_already_running";
       producer_kind = Transient; sync_fallback = true };
     { producer_code = "git_remote_ref_unavailable";
@@ -79,23 +96,23 @@ let classified_producers =
 let producer code =
   List.find_opt (fun value -> value.producer_code = code) classified_producers
 
-let raw_error ?(diagnostics = []) kind code message =
-  { kind; code; message; diagnostics }
+let raw_error ?(details = []) ?(diagnostics = []) kind code message =
+  { kind; code; message; details; diagnostics }
 
-let make_error ?(diagnostics = []) kind code message =
+let make_error ?(details = []) ?(diagnostics = []) kind code message =
   match producer code with
   | Some expected when expected.producer_kind = kind ->
-      raw_error ~diagnostics kind code message
+      raw_error ~details ~diagnostics kind code message
   | Some _ | None when kind = Authentication || kind = Transient ->
       raw_error Internal "sync_producer_contract_invalid"
         "A classified synchronization failure is missing from the production contract."
   | Some _ ->
       raw_error Internal "sync_producer_contract_invalid"
         "A classified synchronization failure has the wrong production kind."
-  | None -> raw_error ~diagnostics kind code message
+  | None -> raw_error ~details ~diagnostics kind code message
 
-let error ?(diagnostics = []) kind code message =
-  Error (make_error ~diagnostics kind code message)
+let error ?(details = []) ?(diagnostics = []) kind code message =
+  Error (make_error ~details ~diagnostics kind code message)
 
 let fallback_producers () =
   classified_producers
@@ -108,6 +125,14 @@ let fallback_error ~code ~message =
   match producer code with
   | Some value when value.sync_fallback ->
       make_error value.producer_kind code message
+  | Some _ | None ->
+      raw_error Internal "sync_producer_contract_invalid"
+        "The requested synchronization fallback producer is not in the production contract."
+
+let fallback_error_with_details ~code ~message ~details =
+  match producer code with
+  | Some value when value.sync_fallback ->
+      make_error ~details value.producer_kind code message
   | Some _ | None ->
       raw_error Internal "sync_producer_contract_invalid"
         "The requested synchronization fallback producer is not in the production contract."
@@ -135,7 +160,7 @@ let cli_result error =
           `List (List.map Diagnostic.json error.diagnostics) ) ]
   in
   Cli_result.failure ~exit_class:(exit_class error) ~code:error.code
-    ~message:error.message ~details:(`Assoc (fallback @ diagnostics))
+    ~message:error.message ~details:(`Assoc (error.details @ fallback @ diagnostics))
 
 let completion_code (report : report) =
   if report.diagnostics = [] then "sync_complete"
@@ -207,8 +232,8 @@ let safe_process_environment =
 
 exception Process_error of error
 
-let execute_process ~input ~environment ~timeout ~hooks ~program ~arguments
-    ~maximum =
+let execute_process_with_session ~new_session ~input ~environment ~timeout ~hooks
+    ~program ~arguments ~maximum =
   let deadline = monotonic_now () +. timeout in
   let owned = ref [] and pid = ref None and session_confirmed = ref false in
   let reaped = ref false and cause = ref None in
@@ -305,7 +330,7 @@ let execute_process ~input ~environment ~timeout ~hooks ~program ~arguments
          close_checked ready_read; close_checked ack_write;
          Option.iter (fun (_, write_end) -> close_checked write_end) input_pipe;
          if hooks.child_setup_delay > 0. then Unix.sleepf hooks.child_setup_delay;
-         ignore (Unix.setsid ());
+         if new_session then ignore (Unix.setsid ());
          let rec send_ready offset =
            if offset < 1 then
              try
@@ -354,7 +379,7 @@ let execute_process ~input ~environment ~timeout ~hooks ~program ~arguments
            | 1 when Bytes.get marker 0 = 'S' ->
                (* The child cannot execute before ACK, so the retained leader
                   PID can now safely anchor negative-PGID cleanup. *)
-               session_confirmed := true
+               session_confirmed := new_session
            | 0 -> raise (Process_error (unavailable_error ()))
            | _ -> await_session ()
          with Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _) ->
@@ -453,7 +478,7 @@ let execute_process ~input ~environment ~timeout ~hooks ~program ~arguments
                          (Process_error
                             { kind = Validation; code = "git_output_limit";
                               message = "Git output exceeded the safety limit.";
-                               diagnostics = [] });
+                              details = []; diagnostics = [] });
                      Buffer.add_subbytes destination chunk 0 count;
                      true
                with
@@ -485,6 +510,11 @@ let execute_process ~input ~environment ~timeout ~hooks ~program ~arguments
   | None, Some status ->
       Ok { stdout = Buffer.contents output; stderr = Buffer.contents errors; status }
   | None, None -> Error (unavailable_error ())
+
+let execute_process ~input ~environment ~timeout ~hooks ~program ~arguments
+    ~maximum =
+  execute_process_with_session ~new_session:true ~input ~environment ~timeout
+    ~hooks ~program ~arguments ~maximum
 
 let git_with ?(environment = safe_process_environment) ?(timeout = 30.)
     ?(hooks = default_process_hooks)
@@ -534,10 +564,42 @@ let trusted_directory path =
   let sticky_root = stat.st_uid = 0 && stat.st_perm land 0o1000 <> 0 in
   stat.st_kind = Unix.S_DIR && owner_ok && (not writable || sticky_root)
 
-let trusted_amp_runtime ?(allow_loopback_amp_url = false) () =
+let unavailable_git_auth () =
+  error Authentication "git_auth_unavailable"
+    "Authenticated Git access is unavailable."
+
+let validate_directory_chain path =
+  let rec validate path =
+    if path <> "/" then begin
+      if Unix.realpath path <> path || not (trusted_directory path) then raise Exit;
+      validate (Filename.dirname path)
+    end
+  in
+  validate path
+
+let validate_amp_executable ~home helper =
+  if Filename.is_relative home || String.contains home '\n'
+     || String.contains home '\r' || Unix.realpath home <> home then raise Exit;
+  let amp_root = Filename.concat home ".amp" in
+  let bin_dir = Filename.concat amp_root "bin" in
+  if helper <> Filename.concat bin_dir "amp" then raise Exit;
+  validate_directory_chain home;
+  List.iter
+    (fun path ->
+      let stat = Unix.lstat path in
+      if Unix.realpath path <> path || stat.st_kind <> Unix.S_DIR
+         || stat.st_uid <> Unix.geteuid () || stat.st_perm land 0o022 <> 0
+      then raise Exit)
+    [ amp_root; bin_dir ];
+  let helper_stat = Unix.lstat helper in
+  if Unix.realpath helper <> helper || helper_stat.st_kind <> Unix.S_REG
+     || helper_stat.st_uid <> Unix.geteuid ()
+     || helper_stat.st_perm land 0o022 <> 0
+     || helper_stat.st_perm land 0o111 = 0 then raise Exit
+
+let trusted_orb_amp_runtime ?(allow_loopback_amp_url = false) () =
   let unavailable () =
-    error Authentication "git_auth_unavailable"
-      "Authenticated Git access is unavailable."
+    unavailable_git_auth ()
   in
   match Sys.getenv_opt "AMP_BIN_DIR", Sys.getenv_opt "HOME",
         Sys.getenv_opt "AMP_API_KEY", Sys.getenv_opt "AMP_URL" with
@@ -558,14 +620,8 @@ let trusted_amp_runtime ?(allow_loopback_amp_url = false) () =
             || (helper_stat.st_uid <> Unix.geteuid () && helper_stat.st_uid <> 0)
             || helper_stat.st_perm land 0o022 <> 0
             || helper_stat.st_perm land 0o111 = 0 then raise Exit;
-         let rec validate_chain path =
-           if path <> "/" then begin
-             if not (trusted_directory path) then raise Exit;
-             validate_chain (Filename.dirname path)
-           end
-         in
-         validate_chain bin_dir;
-         validate_chain home;
+         validate_directory_chain bin_dir;
+         validate_directory_chain home;
          let xdg_config_home = Filename.concat home ".config" in
          let config_exists =
            try ignore (Unix.lstat xdg_config_home); true
@@ -592,6 +648,598 @@ let trusted_amp_runtime ?(allow_loopback_amp_url = false) () =
        with _ -> unavailable ())
   | _ -> unavailable ()
 
+let local_amp_environment home =
+  [| "HOME=" ^ home; "PATH=/usr/bin:/bin"; "GIT_CONFIG_NOSYSTEM=1";
+     "GIT_CONFIG_GLOBAL=/dev/null"; "GIT_TERMINAL_PROMPT=0" |]
+
+let local_amp_git_environment home =
+  match Sys.getenv_opt "XDG_STATE_HOME" with
+  | Some state_home ->
+      Array.append (local_amp_environment home)
+        [| "XDG_STATE_HOME=" ^ state_home |]
+  | None -> local_amp_environment home
+
+let local_amp_version output =
+  let pattern = Str.regexp "^0\\.0\\.\\([0-9]+\\)-g[0-9a-f]+$" in
+  output |> Str.split (Str.regexp "[ \t\r\n]+")
+  |> List.find_map (fun token ->
+         try
+           if Str.string_match pattern token 0 then
+             Some (token, int_of_string (Str.matched_group 1 token))
+           else None
+         with Failure _ | Not_found -> None)
+
+let local_amp_error ?(details = []) kind code message =
+  error ~details kind code message
+
+let local_amp_unsafe cause path_kind =
+  local_amp_error
+    ~details:[ ("cause", `String cause); ("path_kind", `String path_kind) ]
+    Authentication "local_amp_installation_unsafe"
+    "The local Amp installation or enrollment is unsafe."
+
+let open_regular_nofollow path =
+  let parent = Secure_fs.open_directory (Filename.dirname path) in
+  try
+    let descriptor = Secure_fs.open_file_at parent (Filename.basename path) in
+    Unix.close parent;
+    descriptor
+  with failure ->
+    Unix.close parent;
+    raise failure
+
+let read_regular_file path maximum =
+  let before = Unix.lstat path in
+  if before.st_kind <> Unix.S_REG || before.st_size > maximum then raise Exit;
+  let descriptor = open_regular_nofollow path in
+  Fun.protect ~finally:(fun () -> Unix.close descriptor) (fun () ->
+      let opened = Unix.fstat descriptor in
+      if opened.st_dev <> before.st_dev || opened.st_ino <> before.st_ino
+         || opened.st_size <> before.st_size then raise Exit;
+      let length = opened.st_size in
+      let contents = Bytes.create length in
+      let rec read offset =
+        if offset < length then
+          match Unix.read descriptor contents offset (length - offset) with
+          | 0 -> raise Exit
+          | count -> read (offset + count)
+      in
+      read 0;
+      let after = Unix.fstat descriptor in
+      if after.st_dev <> opened.st_dev || after.st_ino <> opened.st_ino
+         || after.st_size <> opened.st_size || after.st_mtime <> opened.st_mtime
+      then raise Exit;
+      (opened, Bytes.unsafe_to_string contents))
+
+let digest_regular_file path maximum =
+  let before = Unix.lstat path in
+  if before.st_kind <> Unix.S_REG || before.st_size > maximum then raise Exit;
+  let descriptor = open_regular_nofollow path in
+  Fun.protect ~finally:(fun () -> Unix.close descriptor) (fun () ->
+      let opened = Unix.fstat descriptor in
+      if opened.st_dev <> before.st_dev || opened.st_ino <> before.st_ino
+         || opened.st_size <> before.st_size then raise Exit;
+      let chunk = Bytes.create 65_536 and context = ref Digestif.SHA256.empty in
+      let rec consume remaining =
+        if remaining > 0 then
+          let requested = min (Bytes.length chunk) remaining in
+          match Unix.read descriptor chunk 0 requested with
+          | 0 -> raise Exit
+          | count ->
+              context := Digestif.SHA256.feed_bytes !context ~len:count chunk;
+              consume (remaining - count)
+      in
+      consume opened.st_size;
+      let after = Unix.fstat descriptor in
+      if after.st_dev <> opened.st_dev || after.st_ino <> opened.st_ino
+         || after.st_size <> opened.st_size || after.st_mtime <> opened.st_mtime
+      then raise Exit;
+      (opened, Digestif.SHA256.(to_hex (get !context))))
+
+let digest_descriptor descriptor maximum =
+  let opened = Unix.fstat descriptor in
+  if opened.st_kind <> Unix.S_REG || opened.st_size <= 0
+     || opened.st_size > maximum then raise Exit;
+  ignore (Unix.lseek descriptor 0 Unix.SEEK_SET);
+  let chunk = Bytes.create 65_536 and context = ref Digestif.SHA256.empty in
+  let rec consume remaining =
+    if remaining > 0 then
+      let requested = min (Bytes.length chunk) remaining in
+      match Unix.read descriptor chunk 0 requested with
+      | 0 -> raise Exit
+      | count ->
+          context := Digestif.SHA256.feed_bytes !context ~len:count chunk;
+          consume (remaining - count)
+  in
+  consume opened.st_size;
+  let after = Unix.fstat descriptor in
+  if after.st_dev <> opened.st_dev || after.st_ino <> opened.st_ino
+     || after.st_size <> opened.st_size || after.st_mtime <> opened.st_mtime
+  then raise Exit;
+  (opened, Digestif.SHA256.(to_hex (get !context)))
+
+let random_hex () =
+  let bytes = Bytes.create 16 in
+  let descriptor =
+    Unix.openfile "/dev/urandom" [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0
+  in
+  Fun.protect ~finally:(fun () -> Unix.close descriptor) (fun () ->
+      let rec read offset =
+        if offset < Bytes.length bytes then
+          match Unix.read descriptor bytes offset (Bytes.length bytes - offset) with
+          | 0 -> raise End_of_file
+          | count -> read (offset + count)
+      in
+      read 0);
+  let hex = "0123456789abcdef" in
+  String.init 32 (fun index ->
+      let byte = Char.code (Bytes.get bytes (index / 2)) in
+      hex.[if index mod 2 = 0 then byte lsr 4 else byte land 0x0f])
+
+let with_pinned_executable descriptor argv0 operation =
+  let parent = Filename.dirname argv0 in
+  let directory = Filename.concat parent (".clamp-exec-" ^ random_hex ()) in
+  let program = Filename.concat directory "amp" in
+  let cleanup () =
+    (try Unix.unlink program with Unix.Unix_error _ -> ());
+    (try Unix.rmdir directory with Unix.Unix_error _ -> ())
+  in
+  try
+    Unix.mkdir directory 0o700;
+    Unix.link argv0 program;
+    let retained = Unix.fstat descriptor and linked = Unix.lstat program in
+    if linked.st_kind <> Unix.S_REG || retained.st_dev <> linked.st_dev
+       || retained.st_ino <> linked.st_ino || retained.st_size <> linked.st_size
+    then raise Exit;
+    let outcome = operation program in
+    cleanup ();
+    outcome
+  with failure -> cleanup (); raise failure
+
+let execute_descriptor ~descriptor ~argv0 ~arguments ~input ~environment ~timeout
+    ~maximum =
+  with_pinned_executable descriptor argv0 (fun program ->
+      let arguments = Array.of_list (argv0 :: arguments) in
+      execute_process ~input ~environment ~timeout ~hooks:default_process_hooks
+        ~program ~arguments ~maximum)
+
+let current_target environment =
+  let run argument =
+    let arguments = [| "/usr/bin/uname"; argument |] in
+    match
+      execute_process ~input:None ~environment ~timeout:2.
+        ~hooks:default_process_hooks ~program:"/usr/bin/uname" ~arguments
+        ~maximum:64
+    with
+    | Ok output when output.status = Unix.WEXITED 0 -> Some (String.trim output.stdout)
+    | Ok _ | Error _ -> None
+  in
+  match run "-s", run "-m" with
+  | Some "Linux", Some "x86_64" -> Some "linux-x86_64"
+  | Some "Darwin", Some "arm64" -> Some "macos-arm64"
+  | _ -> None
+
+type local_amp_enrollment = {
+  amp_device : int;
+  amp_inode : int;
+  amp_path : string;
+  amp_sha256 : string;
+  amp_size : int;
+  amp_version : string;
+  source_repository : string;
+  target : string;
+}
+
+let parse_local_amp_enrollment contents =
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string contents in
+  let nodes = ref 0 in
+  let rec validate_structure depth = function
+    | _ when depth > 16 -> raise Exit
+    | `Assoc fields ->
+        incr nodes;
+        List.iter (fun (_, value) -> validate_structure (depth + 1) value) fields
+    | `List values ->
+        incr nodes;
+        List.iter (validate_structure (depth + 1)) values
+    | `String _ | `Int _ -> incr nodes
+    | _ -> raise Exit
+  in
+  validate_structure 1 json;
+  if !nodes > 256 then raise Exit;
+  let fields = json |> to_assoc in
+  let names = List.map fst fields in
+  let expected =
+    [ "amp_device"; "amp_inode"; "amp_path"; "amp_sha256"; "amp_size";
+      "amp_version"; "qualified_at"; "schema_version"; "source_repository";
+      "target" ]
+  in
+  if List.sort_uniq String.compare names <> List.sort String.compare expected
+     || List.length names <> List.length expected
+     || json |> member "schema_version" |> to_int <> 1
+  then raise Exit;
+  let qualified_at = json |> member "qualified_at" |> to_string in
+  if not
+       (Str.string_match
+          (Str.regexp "^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$")
+          qualified_at 0)
+  then raise Exit;
+  let enrollment =
+    { amp_device = json |> member "amp_device" |> to_int;
+      amp_inode = json |> member "amp_inode" |> to_int;
+      amp_path = json |> member "amp_path" |> to_string;
+      amp_sha256 = json |> member "amp_sha256" |> to_string;
+      amp_size = json |> member "amp_size" |> to_int;
+      amp_version = json |> member "amp_version" |> to_string;
+      source_repository = json |> member "source_repository" |> to_string;
+      target = json |> member "target" |> to_string }
+  in
+  if enrollment.amp_device < 0 || enrollment.amp_inode <= 0
+     || enrollment.amp_size <= 0 || enrollment.amp_size > 268_435_456
+     || Filename.is_relative enrollment.amp_path
+     || not (Runtime_metadata.valid_sha256 enrollment.amp_sha256)
+     || local_amp_version enrollment.amp_version = None
+     || not (List.mem enrollment.target Runtime_metadata.accepted_targets)
+  then raise Exit;
+  enrollment
+
+let local_amp_enrollment ~home ~source =
+  try
+    let state_home =
+      match Sys.getenv_opt "XDG_STATE_HOME" with
+      | Some path -> path
+      | None -> Filename.concat home ".local/state"
+    in
+    if Filename.is_relative state_home || String.contains state_home '\n'
+       || String.contains state_home '\r' || Unix.realpath state_home <> state_home
+    then raise Exit;
+    validate_directory_chain state_home;
+    let source_digest = Digestif.SHA256.(to_hex (digest_string source)) in
+    let clamp_root = Filename.concat state_home "clamp" in
+    let repositories = Filename.concat clamp_root "repositories" in
+    let repository = Filename.concat repositories source_digest in
+    List.iter
+      (fun path ->
+        let observed = Unix.lstat path in
+        if Unix.realpath path <> path || observed.st_kind <> Unix.S_DIR
+           || observed.st_uid <> Unix.geteuid () || observed.st_perm land 0o077 <> 0
+        then raise Exit)
+      [ clamp_root; repositories; repository ];
+    let enrollment_path = Filename.concat repository "local.json" in
+    let observed, contents = read_regular_file enrollment_path 65_536 in
+    if observed.st_uid <> Unix.geteuid () || observed.st_perm land 0o777 <> 0o600
+    then raise Exit;
+    Ok (parse_local_amp_enrollment contents)
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) ->
+      local_amp_error Authentication "local_amp_missing"
+        "The local Amp installation or enrollment is missing."
+  | Exit | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _
+  | Unix.Unix_error _ -> local_amp_unsafe "schema" "state_file"
+
+let open_enrolled_local_amp ~home ~source =
+  let helper = Filename.concat home ".amp/bin/amp" in
+  (try validate_amp_executable ~home helper with
+   | Unix.Unix_error (Unix.ENOENT, _, _) ->
+       raise
+         (Process_error
+            (make_error Authentication "local_amp_missing"
+               "The local Amp installation or enrollment is missing."))
+   | Exit | Unix.Unix_error _ ->
+       raise
+         (Process_error
+            (make_error
+               ~details:[ ("cause", `String "permissions");
+                          ("path_kind", `String "amp_executable") ]
+               Authentication "local_amp_installation_unsafe"
+               "The local Amp installation or enrollment is unsafe.")));
+  let* enrollment = local_amp_enrollment ~home ~source in
+  let environment = local_amp_environment home in
+  let* target =
+    match current_target environment with
+    | Some target -> Ok target
+    | None -> local_amp_unsafe "identity" "state_file"
+  in
+  if enrollment.source_repository <> source || enrollment.target <> target
+     || enrollment.amp_path <> helper then
+    local_amp_unsafe "identity" "state_file"
+  else
+    try
+      let descriptor = open_regular_nofollow helper in
+      match
+        (try
+           let observed, digest = digest_descriptor descriptor 268_435_456 in
+           if enrollment.amp_device <> observed.st_dev
+              || enrollment.amp_inode <> observed.st_ino
+              || enrollment.amp_size <> observed.st_size
+              || enrollment.amp_sha256 <> digest then begin
+             Unix.close descriptor;
+             local_amp_error
+               ~details:[ ("expected_digest", `String enrollment.amp_sha256);
+                          ("observed_digest", `String digest) ]
+               Authentication "local_amp_changed"
+               "The enrolled local Amp executable has changed."
+           end else Ok (helper, environment, enrollment, descriptor, digest)
+         with failure ->
+           Unix.close descriptor;
+           raise failure)
+      with outcome -> outcome
+    with
+    | Exit | Unix.Unix_error _ -> local_amp_unsafe "identity" "amp_executable"
+
+let trusted_local_amp_runtime source =
+  match Sys.getenv_opt "HOME", source with
+  | None, _ | _, None ->
+      local_amp_error Authentication "local_amp_missing"
+        "The local Amp installation or enrollment is missing."
+  | Some home, Some source ->
+      (try
+         let* helper, environment, enrollment, descriptor, observed_digest =
+           open_enrolled_local_amp ~home ~source
+         in
+         let outcome =
+           execute_descriptor ~descriptor ~argv0:helper ~arguments:[ "--version" ]
+             ~input:None ~environment ~timeout:5. ~maximum:4096
+           |> Result.map_error (fun failure ->
+                  match failure.code with
+                  | "git_timeout" ->
+                      make_error ~details:[ ("timeout_seconds", `Int 5) ]
+                        Transient "local_amp_helper_timeout"
+                        "The local Amp credential helper timed out."
+                  | "git_output_limit" ->
+                      make_error ~details:[ ("cause", `String "size") ]
+                        Authentication "local_amp_helper_protocol_invalid"
+                        "The local Amp credential helper response was invalid."
+                  | _ ->
+                      make_error Authentication "local_amp_missing"
+                        "The local Amp installation or enrollment is missing.")
+         in
+         Unix.close descriptor;
+         let* output = outcome in
+         if output.status <> Unix.WEXITED 0 then
+           local_amp_error Authentication "local_amp_missing"
+             "The local Amp installation or enrollment is missing."
+         else match local_amp_version output.stdout with
+         | Some (observed_version, number) when number < 1789113641 ->
+             local_amp_error
+               ~details:[ ("minimum_version", `String "0.0.1789113641-gcd8b8a");
+                          ("observed_version", `String observed_version) ]
+               Authentication "local_amp_version_unsupported"
+               "The local Amp version is unsupported."
+         | Some (observed_version, _) when observed_version <> enrollment.amp_version ->
+             local_amp_error
+               ~details:[ ("expected_digest", `String enrollment.amp_sha256);
+                          ("observed_digest", `String observed_digest) ]
+               Authentication "local_amp_changed"
+               "The enrolled local Amp executable has changed."
+         | Some _ -> Ok (helper, local_amp_git_environment home)
+         | None ->
+             local_amp_unsafe "value" "amp_executable"
+       with
+       | Process_error failure -> Error failure
+       | Exit | Unix.Unix_error _ -> local_amp_unsafe "identity" "amp_executable")
+
+let trusted_amp_runtime ?source ?(allow_loopback_amp_url = false) () =
+  match Sys.getenv_opt "AMP_BIN_DIR", Sys.getenv_opt "AMP_API_KEY",
+        Sys.getenv_opt "AMP_URL" with
+  | Some _, Some _, Some _ ->
+      trusted_orb_amp_runtime ~allow_loopback_amp_url ()
+  | None, None, None -> trusted_local_amp_runtime source
+  | _ -> unavailable_git_auth ()
+
+let shell_quote value =
+  "'" ^ String.concat "'\\''" (String.split_on_char '\'' value) ^ "'"
+
+let amp_git_configuration helper =
+  [ "-c"; "credential.helper=";
+    "-c"; "credential.helper=!" ^ shell_quote helper ^ " git-credential-helper";
+    "-c"; "credential.https://ampcode.com.useHttpPath=true";
+    "-c"; "core.hooksPath=/dev/null";
+    "-c"; "core.askPass=/bin/false";
+    "-c"; "credential.interactive=false" ]
+
+let local_amp_git_configuration proxy source pinned =
+  [ "-c"; "credential.helper=";
+    "-c";
+    "credential.helper=!" ^ shell_quote proxy
+    ^ " __clamp-credential-helper " ^ shell_quote source ^ " "
+    ^ shell_quote pinned;
+    "-c"; "credential.https://ampcode.com.useHttpPath=true";
+    "-c"; "core.hooksPath=/dev/null";
+    "-c"; "core.askPass=/bin/false";
+    "-c"; "credential.interactive=false" ]
+
+let write_all descriptor contents =
+  let rec write offset =
+    if offset < String.length contents then
+      match Unix.write_substring descriptor contents offset
+              (String.length contents - offset) with
+      | 0 -> raise End_of_file
+      | count -> write (offset + count)
+  in
+  write 0
+
+let record_local_helper_status ~operation ~code ~details =
+  match Sys.getenv_opt "CLAMP_LOCAL_AMP_STATUS" with
+  | None -> ()
+  | Some path ->
+      (try
+         let descriptor =
+           Unix.openfile path
+             [ Unix.O_WRONLY; Unix.O_APPEND; Unix.O_CLOEXEC ] 0
+         in
+         Fun.protect ~finally:(fun () -> Unix.close descriptor) (fun () ->
+             let named = Unix.lstat path in
+             let observed = Unix.fstat descriptor in
+             if observed.st_kind <> Unix.S_REG
+                || named.st_kind <> Unix.S_REG
+                || named.st_dev <> observed.st_dev || named.st_ino <> observed.st_ino
+                || observed.st_uid <> Unix.geteuid ()
+                || observed.st_perm land 0o777 <> 0o600
+                || observed.st_size > 4096 then raise Exit;
+             let status =
+               `Assoc
+                 [ ("operation", `String operation); ("code", `String code);
+                   ("details", `Assoc details) ]
+               |> Yojson.Safe.to_string
+             in
+             write_all descriptor (status ^ "\n"))
+       with _ -> ())
+
+let bounded_stdin maximum =
+  let buffer = Buffer.create 1024 and chunk = Bytes.create 4096 in
+  let rec read () =
+    let count = input Stdlib.stdin chunk 0 (Bytes.length chunk) in
+    if count = 0 then Buffer.contents buffer
+    else if Buffer.length buffer + count > maximum then raise Exit
+    else (Buffer.add_subbytes buffer chunk 0 count; read ())
+  in
+  read ()
+
+let valid_credential_protocol ~response contents =
+  let allowed =
+    if response then
+      [ "username"; "password"; "password_expiry_utc"; "oauth_refresh_token" ]
+    else
+      [ "url"; "protocol"; "host"; "path"; "username"; "password";
+        "password_expiry_utc"; "oauth_refresh_token"; "capability[]";
+        "wwwauth[]"; "state[]" ]
+  in
+  if not (Frontmatter.valid_utf8 contents) || String.contains contents '\000'
+     || String.contains contents '\r' then false
+  else
+    let lines = String.split_on_char '\n' contents in
+    let complete seen =
+      if response then List.mem "username" seen && List.mem "password" seen
+      else true
+    in
+    let rec parse seen = function
+      | [] | [ "" ] -> complete seen
+      | "" :: rest -> List.for_all (( = ) "") rest && complete seen
+      | line :: rest ->
+          (match String.index_opt line '=' with
+          | Some separator when separator > 0 ->
+              let key = String.sub line 0 separator in
+              let value =
+                String.sub line (separator + 1)
+                  (String.length line - separator - 1)
+              in
+              let repeated =
+                List.mem key [ "capability[]"; "wwwauth[]"; "state[]" ]
+              in
+              List.mem key allowed && (repeated || not (List.mem key seen))
+              && value <> ""
+              && parse (key :: seen) rest
+          | _ -> false)
+    in
+    parse [] lines
+
+let credential_helper ~source ~pinned ~operation =
+  let finish ?(details = []) status code =
+    record_local_helper_status ~operation ~code:status ~details;
+    code
+  in
+  if not (List.mem operation [ "get"; "store"; "erase" ]) then
+    finish ~details:[ ("cause", `String "value") ]
+      "local_amp_helper_protocol_invalid" 1
+  else
+    try
+      let input = bounded_stdin 65_536 in
+      if not (valid_credential_protocol ~response:false input) then
+        finish ~details:[ ("cause", `String "value") ]
+          "local_amp_helper_protocol_invalid" 1
+      else
+        match Sys.getenv_opt "HOME" with
+        | None -> finish "local_amp_missing" 1
+        | Some home ->
+            (match open_enrolled_local_amp ~home ~source with
+            | Error failure -> finish ~details:failure.details failure.code 1
+            | Ok (helper, environment, _, descriptor, _) ->
+                let pinned_valid =
+                  try
+                    let retained = Unix.fstat descriptor
+                    and linked = Unix.lstat pinned
+                    and directory = Unix.lstat (Filename.dirname pinned) in
+                    linked.st_kind = Unix.S_REG
+                    && retained.st_dev = linked.st_dev
+                    && retained.st_ino = linked.st_ino
+                    && retained.st_size = linked.st_size
+                    && directory.st_kind = Unix.S_DIR
+                    && directory.st_uid = Unix.geteuid ()
+                    && directory.st_perm land 0o077 = 0
+                    && Filename.dirname (Filename.dirname pinned)
+                       = Filename.dirname helper
+                    && String.starts_with ~prefix:".clamp-exec-"
+                         (Filename.basename (Filename.dirname pinned))
+                  with Unix.Unix_error _ -> false
+                in
+                if not pinned_valid then begin
+                  Unix.close descriptor;
+                  finish
+                    ~details:[ ("cause", `String "identity");
+                               ("path_kind", `String "amp_executable") ]
+                    "local_amp_installation_unsafe" 1
+                end else
+                let outcome =
+                  let arguments =
+                    [| helper; "git-credential-helper"; operation |]
+                  in
+                  execute_process_with_session ~new_session:false ~input:(Some input)
+                    ~environment ~timeout:5. ~hooks:default_process_hooks
+                    ~program:pinned ~arguments ~maximum:65_536
+                in
+                Unix.close descriptor;
+                match outcome with
+                | Error failure when failure.code = "git_timeout" ->
+                    finish ~details:[ ("timeout_seconds", `Int 5) ]
+                      "local_amp_helper_timeout" 1
+                | Error failure when failure.code = "git_output_limit" ->
+                    finish ~details:[ ("cause", `String "size") ]
+                      "local_amp_helper_protocol_invalid" 1
+                | Error _ -> finish "local_amp_login_required" 1
+                | Ok output when output.status <> Unix.WEXITED 0 ->
+                    finish "local_amp_login_required" 1
+                | Ok output ->
+                    let valid =
+                      if operation = "get" then
+                        valid_credential_protocol ~response:true output.stdout
+                      else String.trim output.stdout = ""
+                    in
+                    if not valid then
+                      finish ~details:[ ("cause", `String "value") ]
+                        "local_amp_helper_protocol_invalid" 1
+                    else begin
+                      print_string output.stdout;
+                      flush stdout;
+                      finish "ok" 0
+                    end)
+    with
+    | Process_error failure -> finish ~details:failure.details failure.code 1
+    | _ ->
+        finish ~details:[ ("cause", `String "value") ]
+          "local_amp_helper_protocol_invalid" 1
+
+let local_authentication_context () =
+  Sys.getenv_opt "AMP_BIN_DIR" = None
+  && Sys.getenv_opt "AMP_API_KEY" = None
+  && Sys.getenv_opt "AMP_URL" = None
+
+let local_git_error timeout (failure : error) =
+  match failure.code with
+  | "git_timeout" ->
+      make_error
+        ~details:[ ("timeout_seconds", `Int (max 1 (int_of_float (ceil timeout)))) ]
+        Transient "local_amp_helper_timeout"
+        "The local Amp credential helper timed out."
+  | "git_output_limit" ->
+      make_error ~details:[ ("cause", `String "size") ] Authentication
+        "local_amp_helper_protocol_invalid"
+        "The local Amp credential helper response was invalid."
+  | "git_auth_failed" ->
+      make_error Authentication "local_amp_login_required"
+        "The local Amp login is required."
+  | _ -> failure
+
 let amp_remote source remote =
   String.starts_with ~prefix:"ampcode.com/" source
   && (remote = "https://" ^ source || remote = "https://" ^ source ^ ".git")
@@ -606,6 +1254,7 @@ let dangerous_local_git_config repo =
     || String.starts_with ~prefix:"include." key
     || String.starts_with ~prefix:"includeif." key
     || key = "core.askpass" || key = "core.hookspath"
+    || key = "extensions.worktreeconfig"
     || String.starts_with ~prefix:"remote.origin.proxy" key
     || key = "remote.origin.uploadpack"
   in
@@ -623,25 +1272,37 @@ let dangerous_local_git_config repo =
   in
   inspect records
 
-let amp_git ?(timeout = 30.) ?(allow_loopback_amp_url = false)
-    repo remote arguments maximum =
+let amp_git ?proxy ?(timeout = 30.) ?(allow_loopback_amp_url = false)
+    repo source remote arguments maximum =
+  let local = local_authentication_context () in
   let* dangerous = dangerous_local_git_config repo in
   if dangerous then
     error Authentication "git_auth_config_unsafe"
       "Authenticated Git configuration is unsafe."
   else
     let* helper, environment =
-      trusted_amp_runtime ~allow_loopback_amp_url ()
+      trusted_amp_runtime ~source ~allow_loopback_amp_url ()
     in
-    git_with ~environment ~timeout ~failure_kind:Authentication
-      ~failure_code:"git_auth_failed" repo
-      ([ "-c"; "credential.helper=";
-         "-c"; "credential.helper=!" ^ helper ^ " git-credential-helper";
-         "-c"; "credential.https://ampcode.com.useHttpPath=true";
-         "-c"; "core.hooksPath=/dev/null";
-         "-c"; "core.askPass=/bin/false";
-         "-c"; "credential.interactive=false" ] @ arguments remote)
-      maximum
+    let configuration =
+      match local, proxy with
+      | true, Some _ -> []
+      | _ -> amp_git_configuration helper
+    in
+    (match local, proxy, Sys.getenv_opt "HOME" with
+    | true, Some proxy, Some home ->
+        let* _, _, _, descriptor, _ = open_enrolled_local_amp ~home ~source in
+        Fun.protect ~finally:(fun () -> Unix.close descriptor) (fun () ->
+            with_pinned_executable descriptor helper (fun pinned ->
+                git_with ~environment ~timeout ~failure_kind:Authentication
+                  ~failure_code:"git_auth_failed" repo
+                  (local_amp_git_configuration proxy source pinned
+                   @ arguments remote) maximum))
+    | _ ->
+        git_with ~environment ~timeout ~failure_kind:Authentication
+          ~failure_code:"git_auth_failed" repo
+          (configuration @ arguments remote) maximum)
+    |> Result.map_error (fun failure ->
+           if local then local_git_error timeout failure else failure)
 
 let origin_urls repo =
   let split output =
@@ -657,24 +1318,143 @@ let origin_urls repo =
   in
   Ok (split fetch, split push)
 
-let remote_git_status ?(timeout = 30.) repo source remote arguments maximum =
-  if not (amp_remote source remote) then
+let remote_git_status ?proxy ?(timeout = 30.) ?(allow_loopback_amp_url = false)
+    repo source remote arguments maximum =
+  let authenticated =
+    amp_remote source remote
+    || (allow_loopback_amp_url
+        && (String.starts_with ~prefix:"https://127.0.0.1:" remote
+            || String.starts_with ~prefix:"https://[::1]:" remote))
+  in
+  if not authenticated then
     git_status_with ~timeout repo (arguments remote) maximum
   else
+    let local = local_authentication_context () in
     let* dangerous = dangerous_local_git_config repo in
     if dangerous then
       error Authentication "git_auth_config_unsafe"
         "Authenticated Git configuration is unsafe."
     else
-      let* helper, environment = trusted_amp_runtime () in
-      git_status_with ~environment ~timeout repo
-        ([ "-c"; "credential.helper=";
-           "-c"; "credential.helper=!" ^ helper ^ " git-credential-helper";
-           "-c"; "credential.https://ampcode.com.useHttpPath=true";
-           "-c"; "core.hooksPath=/dev/null";
-           "-c"; "core.askPass=/bin/false";
-           "-c"; "credential.interactive=false" ] @ arguments remote)
-        maximum
+      let* helper, environment =
+        trusted_amp_runtime ~source ~allow_loopback_amp_url ()
+      in
+      if not local then
+        git_status_with ~environment ~timeout repo
+          (amp_git_configuration helper @ arguments remote) maximum
+      else
+        let status_path = Filename.temp_file "clamp-amp-helper-" ".status" in
+        Unix.chmod status_path 0o600;
+        Fun.protect
+          ~finally:(fun () ->
+            try Unix.unlink status_path with Unix.Unix_error _ -> ())
+          (fun () ->
+            let proxy =
+              Option.value proxy ~default:(Unix.realpath Sys.executable_name)
+            in
+            let environment =
+              Array.append environment
+                [| "CLAMP_LOCAL_AMP_STATUS=" ^ status_path |]
+            in
+            let outcome =
+              match Sys.getenv_opt "HOME" with
+              | None ->
+                  local_amp_error Authentication "local_amp_missing"
+                    "The local Amp installation or enrollment is missing."
+              | Some home ->
+                  let* _, _, _, descriptor, _ =
+                    open_enrolled_local_amp ~home ~source
+                  in
+                  Fun.protect ~finally:(fun () -> Unix.close descriptor) (fun () ->
+                      with_pinned_executable descriptor helper (fun pinned ->
+                          git_status_with ~environment ~timeout repo
+                            (local_amp_git_configuration proxy source pinned
+                             @ arguments remote) maximum)
+                      |> Result.map_error (local_git_error timeout))
+            in
+            let markers =
+              try
+                let _, contents = read_regular_file status_path 4096 in
+                let decode line =
+                  let open Yojson.Safe.Util in
+                  let json = Yojson.Safe.from_string line in
+                  let fields = to_assoc json in
+                  if List.map fst fields |> List.sort String.compare
+                     <> [ "code"; "details"; "operation" ] then raise Exit;
+                  let operation = json |> member "operation" |> to_string
+                  and code = json |> member "code" |> to_string
+                  and details = json |> member "details" |> to_assoc in
+                  if not (List.mem operation [ "get"; "store"; "erase" ])
+                  then raise Exit;
+                  let detail_names = List.map fst details in
+                  let exact names = detail_names = names in
+                  let valid_details =
+                    match code with
+                    | "ok" | "local_amp_missing" | "local_amp_login_required" ->
+                        details = []
+                    | "local_amp_helper_timeout" ->
+                        exact [ "timeout_seconds" ]
+                        && List.assoc "timeout_seconds" details = `Int 5
+                    | "local_amp_helper_protocol_invalid" ->
+                        exact [ "cause" ]
+                        && List.mem (List.assoc "cause" details)
+                             [ `String "size"; `String "value" ]
+                    | "local_amp_changed" ->
+                        exact [ "expected_digest"; "observed_digest" ]
+                        && List.for_all
+                             (fun name ->
+                               match List.assoc name details with
+                               | `String value -> Runtime_metadata.valid_sha256 value
+                               | _ -> false)
+                             [ "expected_digest"; "observed_digest" ]
+                    | "local_amp_installation_unsafe" ->
+                        exact [ "cause"; "path_kind" ]
+                        && List.for_all
+                             (fun name ->
+                               match List.assoc name details with
+                               | `String value -> String.length value <= 64
+                               | _ -> false)
+                             [ "cause"; "path_kind" ]
+                    | _ -> false
+                  in
+                  if not valid_details then raise Exit;
+                  (operation, code, details)
+                in
+                contents |> String.split_on_char '\n'
+                |> List.filter (fun value -> value <> "") |> List.map decode
+              with _ -> []
+            in
+            let get_marker =
+              markers |> List.filter (fun (operation, _, _) -> operation = "get")
+              |> List.rev
+              |> function marker :: _ -> Some marker | [] -> None
+            in
+            match get_marker, outcome with
+            | Some (_, "local_amp_helper_timeout", details), _ ->
+                local_amp_error ~details Transient "local_amp_helper_timeout"
+                  "The local Amp credential helper timed out."
+            | Some (_, "local_amp_helper_protocol_invalid", details), _ ->
+                local_amp_error ~details Authentication
+                  "local_amp_helper_protocol_invalid"
+                  "The local Amp credential helper response was invalid."
+            | Some (_, "local_amp_missing", details), _ ->
+                local_amp_error ~details Authentication "local_amp_missing"
+                  "The local Amp installation or enrollment is missing."
+            | Some (_, "local_amp_changed", details), _ ->
+                local_amp_error ~details Authentication "local_amp_changed"
+                  "The enrolled local Amp executable has changed."
+            | Some (_, "local_amp_installation_unsafe", details), _ ->
+                local_amp_error ~details Authentication
+                  "local_amp_installation_unsafe"
+                  "The local Amp installation or enrollment is unsafe."
+            | Some (_, "local_amp_login_required", details), _ ->
+                local_amp_error ~details Authentication "local_amp_login_required"
+                  "The local Amp login is required."
+            | Some (_, "ok", _), Ok result when result.succeeded -> Ok result
+            | None, Ok result when not result.succeeded ->
+                local_amp_error Transient "local_amp_remote_unavailable"
+                  ~details:[ ("cause", `String "verify") ]
+                  "The authenticated local Amp remote is unavailable."
+            | _, outcome -> outcome)
 
 let fetch_origin_main ?(force = true) repo source maximum =
   let* fetch_urls, _ = origin_urls repo in
@@ -1654,11 +2434,19 @@ module For_test = struct
       (execute_process ~input:None ~environment:safe_process_environment
          ~program ~arguments ~maximum ~timeout ~hooks)
   let parse_knowledge_root = parse_knowledge_root
-  let trusted_amp_runtime () =
-    trusted_amp_runtime ~allow_loopback_amp_url:true ()
+  let trusted_amp_runtime ?source () =
+    trusted_amp_runtime ?source ~allow_loopback_amp_url:true ()
   let amp_remote = amp_remote
-  let amp_git ~repo ~remote ~arguments ~maximum ~timeout =
-    amp_git ~timeout ~allow_loopback_amp_url:true repo remote
+  let valid_credential_request contents =
+    valid_credential_protocol ~response:false contents
+  let amp_git_with_proxy ~proxy ~repo ~source ~remote ~arguments ~maximum ~timeout =
+    amp_git ~proxy ~timeout ~allow_loopback_amp_url:true repo source remote
+      (fun remote -> arguments remote) maximum
+  let amp_git ~repo ~source ~remote ~arguments ~maximum ~timeout =
+    amp_git ~timeout ~allow_loopback_amp_url:true repo source remote
+      (fun remote -> arguments remote) maximum
+  let remote_git_status ~proxy ~repo ~source ~remote ~arguments ~maximum ~timeout =
+    remote_git_status ~proxy ~timeout ~allow_loopback_amp_url:true repo source remote
       (fun remote -> arguments remote) maximum
   let local_origin_main_with_hooks ~repo ~timeout ~child_setup_delay ~after_fork =
     local_origin_main_with ~timeout

@@ -748,10 +748,10 @@ let allowed_database_url_fixtures =
       ^ "fixture@127.0.0.1:1/fixture?sslmode=require&channel_binding=require&connect_timeout=1" );
     ( "test/integration/phase3_database_test.ml",
       "postgresql://%s:"
-      ^ "%s@does-not-exist.invalid:5432,127.0.0.1:5432/%s?sslmode=require&channel_binding=require" );
+      ^ "%s@does-not-exist.invalid:5432,127.0.0.1:%d/%s?sslmode=require&channel_binding=require" );
     ( "test/integration/phase3_database_test.ml",
       "postgresql://%s:"
-      ^ "%s@[2001:db8::1]:5432,127.0.0.1:5432/%s?sslmode=require&channel_binding=require" ) ]
+      ^ "%s@[%s]:%d,127.0.0.1:%d/%s?sslmode=require&channel_binding=require" ) ]
 
 let allowed_test_database_url relative token =
   List.mem (relative, token) allowed_database_url_fixtures

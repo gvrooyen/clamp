@@ -155,14 +155,14 @@ by exact target and archive digest, and invokes the absolute executable with an
 explicit `--repo`. There is no process-global active runtime requirement, so
 two repositories may retain different pins.
 
-.agents/setup` remains Orb lifecycle code. `.agents/setup-local` now performs
+`.agents/setup` remains Orb lifecycle code. `.agents/setup-local` now performs
 only explicit local preflight, immutable checksum-verified runtime installation,
-launcher verification, and bundle validation; it neither adapts tracked files
-nor runs Orb PostgreSQL setup. Trusted machine-local Amp enrollment and helper
-execution remain the next boundary. They will live outside the checkout in an
-effective-user-private XDG state tree and contain no secret. Local Git
-operations continue to retain the existing `Sync`/`Publication` ownership
-boundary.
+launcher verification, bundle validation, and trusted machine-local Amp
+enrollment; it neither adapts tracked files nor runs Orb PostgreSQL setup.
+Enrollment lives outside the checkout in an effective-user-private XDG state
+tree and contains no secret. `Sync` validates the enrolled executable and
+isolates its credential helper for exact Amp Git origins; `Publication` retains
+its existing non-force and post-push synchronization boundary.
 
 `Scaffold` owns migration independently of `Initializer`. It recognizes the
 frozen exact 0.1.4 generated identities, retains and validates the complete
@@ -177,8 +177,9 @@ than shell overrides around Linux behavior.
 Portable runtime metadata, native Linux/macOS runtime packaging, the repository
 launcher, local runtime setup, generated consumer scaffold, and scaffold
 migration are implemented toward 0.2. Machine-local Amp enrollment and trusted
-local Git authentication remain later-phase work. The target qualification
-record is in [Phase 1](./docs/local-clone-phase1.md), with native runtime
+local Git authentication are implemented but not yet qualified by native
+real-clone workflows. The target qualification record is in
+[Phase 1](./docs/local-clone-phase1.md), with native runtime
 evidence in [Phase 3](./docs/macos-phase3.md).
 
 ## Embeddings and synchronization

@@ -223,6 +223,10 @@ fi
   "$manifest_sha256" || fail_cause local_runtime_install_failed install 70
 "$launcher" --version >/dev/null || fail_cause local_runtime_install_failed verify 70
 "$launcher" validate --json >/dev/null || fail_cause local_runtime_install_failed verify 70
+/usr/bin/python3 -I "$runtime_metadata" qualify-amp "$HOME" \
+  "$HOME/.amp/bin/amp" "$repo_root" "$origin" "$source_repository" "$target" \
+  || fail local_amp_installation_unsafe \
+       '{"cause":"identity","path_kind":"state_file"}' 4
 
 for name in OPENROUTER_API_KEY KB_DATABASE_URL KB_DATABASE_DIRECT_URL; do
   if [[ -n "${!name:-}" ]]; then state=present; else state=missing; fi

@@ -304,7 +304,28 @@ let producer_sync_error code message =
           Clamp.Sync.For_test.openrouter_error
             { Clamp.Openrouter.kind = Transient; code; message;
               paid_request_ambiguous = true }
-      | None -> Clamp.Sync.fallback_error ~code ~message)
+      | None ->
+          let details =
+            match code with
+            | "local_amp_version_unsupported" ->
+                [ ("minimum_version", `String "0.0.1789113641-gcd8b8a");
+                  ("observed_version", `String "0.0.1789000000-gabcdef") ]
+            | "local_amp_installation_unsafe" ->
+                [ ("cause", `String "permissions");
+                  ("path_kind", `String "amp_executable") ]
+            | "local_amp_changed" ->
+                [ ("expected_digest", `String (String.make 64 '1'));
+                  ("observed_digest", `String (String.make 64 '2')) ]
+            | "local_amp_helper_protocol_invalid"
+            | "local_amp_remote_unavailable" ->
+                [ ("cause", `String (if code = "local_amp_helper_protocol_invalid"
+                                      then "size" else "verify")) ]
+            | "local_amp_helper_timeout" ->
+                [ ("timeout_seconds", `Int 5) ]
+            | _ -> []
+          in
+          if details = [] then Clamp.Sync.fallback_error ~code ~message
+          else Clamp.Sync.fallback_error_with_details ~code ~message ~details)
 
 let sync_failure_contracts () =
   let json = Yojson.Safe.from_file fixture_path in
@@ -321,7 +342,7 @@ let sync_failure_contracts () =
     |> List.map (fun (code, kind) -> code, sync_kind_name kind)
     |> List.sort compare
   in
-  Alcotest.(check int) "current authoritative producer count" 21
+  Alcotest.(check int) "current authoritative producer count" 29
     (List.length production_producers);
   Alcotest.(check (list (pair string string)))
     "fixture exactly matches authoritative production producers"
@@ -362,7 +383,8 @@ let sync_diagnostics_preserved () =
   in
   let error : Clamp.Sync.error =
     { kind = Transient; code = "database_unavailable";
-      message = "Database connection failed."; diagnostics = [ diagnostic ] }
+      message = "Database connection failed."; details = [];
+      diagnostics = [ diagnostic ] }
   in
   let result = Clamp.Sync.cli_result error |> Clamp.Cli_result.to_yojson in
   let open Yojson.Safe.Util in
@@ -384,13 +406,13 @@ let sync_diagnostics_preserved () =
         (details |> member "fallback" = `Null))
     [ ( "deterministic validation",
         { kind = Validation; code = "index_state_missing";
-          message = "fixture"; diagnostics = [] } );
+          message = "fixture"; details = []; diagnostics = [] } );
       ( "deterministic internal",
         { kind = Internal; code = "sync_plan_invalid";
-          message = "fixture"; diagnostics = [] } );
+          message = "fixture"; details = []; diagnostics = [] } );
       ( "publication-only remote verification",
         { kind = Transient; code = "git_remote_ref_unavailable";
-          message = "fixture"; diagnostics = [] } ) ]
+          message = "fixture"; details = []; diagnostics = [] } ) ]
 
 let publication_kind = function
   | "validation" -> Clamp.Publication.Validation
@@ -462,6 +484,7 @@ let publication_failure_contracts () =
              paths = contract |> member "paths" |> to_list |> List.map to_string;
              cause = optional_string contract "cause";
              cleanup_cause = optional_string contract "cleanup_cause";
+             details = [];
              diagnostics = [] }
          in
          seen := code :: !seen;

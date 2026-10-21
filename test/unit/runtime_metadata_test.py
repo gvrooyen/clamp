@@ -16,8 +16,13 @@ REVISION = "0123456789abcdef0123456789abcdef01234567"
 TARGETS = ("linux-x86_64", "macos-arm64")
 
 
-def run(*args, ok=True):
-    result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+def run(*args, ok=True, environment=None):
+    child_environment = os.environ.copy()
+    child_environment.pop("XDG_STATE_HOME", None)
+    if environment is not None:
+        child_environment.update(environment)
+    result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            env=child_environment)
     if (result.returncode == 0) != ok:
         raise AssertionError((args, result.returncode, result.stdout, result.stderr))
     return result
@@ -67,9 +72,113 @@ with tempfile.TemporaryDirectory(prefix="clamp-runtime-metadata-") as temporary:
     amp = amp_home / ".amp/bin/amp"
     write(amp, b"#!/bin/sh\n", 0o700)
     run("python3", str(PARSER), "verify-amp", str(amp_home), str(amp))
+    write(amp, b"#!/bin/sh\nprintf 'amp 0.0.1789171288-gd95a61\\n'\n", 0o700)
+    executed_version = run("python3", str(PARSER), "amp-version-exec",
+                           str(amp_home), str(amp))
+    assert executed_version.stdout.splitlines() == [b"ok", b"0.0.1789171288-gd95a61"]
+    assert not list(amp.parent.glob(".clamp-exec-*"))
     amp.parent.chmod(0o770)
     run("python3", str(PARSER), "verify-amp", str(amp_home), str(amp), ok=False)
     amp.parent.chmod(0o700)
+    amp_source = "ampcode.com/git/@fixture/-/assistant"
+    amp_version = "0.0.1789171288-gd95a61"
+    run("python3", str(PARSER), "enroll-amp", str(amp_home), amp_source,
+        "linux-x86_64", str(amp), amp_version)
+    enrollment = (amp_home / ".local/state/clamp/repositories"
+                  / hashlib.sha256(amp_source.encode()).hexdigest() / "local.json")
+    record = json.loads(enrollment.read_bytes())
+    assert record == {
+        "amp_device": amp.stat().st_dev,
+        "amp_inode": amp.stat().st_ino,
+        "amp_path": str(amp),
+        "amp_sha256": hashlib.sha256(amp.read_bytes()).hexdigest(),
+        "amp_size": amp.stat().st_size,
+        "amp_version": amp_version,
+        "qualified_at": record["qualified_at"],
+        "schema_version": 1,
+        "source_repository": amp_source,
+        "target": "linux-x86_64",
+    }
+    assert enrollment.stat().st_mode & 0o777 == 0o600
+    assert all(name not in enrollment.read_text()
+               for name in ("token", "password", "knowledge", "thread"))
+    enrollment_args = [str(PARSER), "enroll-amp", str(amp_home), amp_source,
+                       "linux-x86_64", str(amp), amp_version]
+    short_write = (
+        "import os,runpy,sys; real=os.write; "
+        "os.write=lambda fd,data: real(fd,data[:max(1,len(data)//2)]); "
+        f"sys.argv={enrollment_args!r}; runpy.run_path({str(PARSER)!r},run_name='__main__')"
+    )
+    run("python3", "-c", short_write)
+    assert not list(enrollment.parent.glob(".enrollment-*"))
+    before_failed_write = enrollment.read_bytes()
+    failed_write = (
+        "import os,runpy,sys; "
+        "os.fsync=lambda fd: (_ for _ in ()).throw(OSError('injected')); "
+        f"sys.argv={enrollment_args!r}; runpy.run_path({str(PARSER)!r},run_name='__main__')"
+    )
+    failed = run("python3", "-c", failed_write, ok=False)
+    assert b"Traceback" not in failed.stderr
+    assert enrollment.read_bytes() == before_failed_write
+    assert not list(enrollment.parent.glob(".enrollment-*"))
+    post_replace = (
+        "import os,runpy,sys\nreal=os.fsync\ncalls=[0]\n"
+        "def sync(fd):\n calls[0]+=1\n if calls[0]==1: return real(fd)\n"
+        " raise OSError('injected')\nos.fsync=sync\n"
+        f"sys.argv={enrollment_args!r}\n"
+        f"runpy.run_path({str(PARSER)!r},run_name='__main__')"
+    )
+    uncertain = run("python3", "-c", post_replace, ok=False)
+    assert uncertain.stderr == b"Amp enrollment durability uncertain\n"
+    assert not list(enrollment.parent.glob(".enrollment-*"))
+    replacement = enrollment.parent / "displaced.json"
+    identity_race = (
+        "import os,runpy,sys\nreal=os.lstat\ncalls=[0]\n"
+        f"target={str(enrollment)!r}\ndisplaced={str(replacement)!r}\n"
+        "def observed(path):\n"
+        " if os.fspath(path)==target:\n"
+        "  calls[0]+=1\n"
+        "  if calls[0]==4:\n"
+        "   os.rename(target,displaced)\n"
+        "   with open(target,'wb') as stream: stream.write(b'foreign\\n')\n"
+        "   os.chmod(target,0o600)\n"
+        " return real(path)\n"
+        "os.lstat=observed\n"
+        f"sys.argv={enrollment_args!r}\n"
+        f"runpy.run_path({str(PARSER)!r},run_name='__main__')"
+    )
+    raced = run("python3", "-c", identity_race, ok=False)
+    assert raced.stderr == b"unsafe Amp enrollment\n"
+    assert enrollment.read_bytes() == b"foreign\n"
+    assert not list(enrollment.parent.glob(".enrollment-*"))
+    replacement.replace(enrollment)
+    run("python3", str(PARSER), "enroll-amp", str(amp_home), amp_source,
+        "linux-x86_64", str(amp), amp_version, ok=False,
+        environment={"XDG_STATE_HOME": ""})
+    explicit_state = work / "explicit-state"
+    explicit_state.mkdir(mode=0o700)
+    run("python3", str(PARSER), "enroll-amp", str(amp_home), amp_source,
+        "linux-x86_64", str(amp), amp_version,
+        environment={"XDG_STATE_HOME": str(explicit_state)})
+    explicit_enrollment = (explicit_state / "clamp/repositories"
+                           / hashlib.sha256(amp_source.encode()).hexdigest()
+                           / "local.json")
+    assert explicit_enrollment.stat().st_mode & 0o777 == 0o600
+    unsafe_state = work / "unsafe-state"
+    unsafe_state.mkdir(mode=0o777)
+    unsafe_state.chmod(0o777)
+    run("python3", str(PARSER), "enroll-amp", str(amp_home), amp_source,
+        "linux-x86_64", str(amp), amp_version, ok=False,
+        environment={"XDG_STATE_HOME": str(unsafe_state)})
+    previous_digest = record["amp_sha256"]
+    write(amp, b"#!/bin/sh\n# updated\n", 0o700)
+    run("python3", str(PARSER), "enroll-amp", str(amp_home), amp_source,
+        "linux-x86_64", str(amp), amp_version)
+    assert json.loads(enrollment.read_bytes())["amp_sha256"] != previous_digest
+    enrollment.chmod(0o644)
+    run("python3", str(PARSER), "enroll-amp", str(amp_home), amp_source,
+        "linux-x86_64", str(amp), amp_version, ok=False)
+    enrollment.chmod(0o600)
     archives = [package(work, target) for target in TARGETS]
     result = run(str(MANIFEST), VERSION, REVISION, *map(str, archives))
     manifest_path = pathlib.Path(result.stdout.decode().strip())

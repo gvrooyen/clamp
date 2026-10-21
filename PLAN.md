@@ -439,6 +439,13 @@ workflows, signing/notarization, and release publication remain later gates.
 
 ## Phase 5: Trusted local Amp Git authentication
 
+**Status: implemented, not target-qualified.** The local enrollment, pinned
+credential-helper boundary, authenticated sync/publication paths, and Linux
+loopback/hostile-state fixtures are in source and Oracle-reviewed. Native macOS
+verification, a real local-login/update, and disposable private Amp-hosted
+clone/publish/exact-tip-sync on each target remain exit gates. Phase 6 and the
+0.2 release are not complete.
+
 ### Design
 
 Keep the current Orb credential path unchanged. Add a separate local path that

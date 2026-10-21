@@ -3,8 +3,9 @@
 ## Status and authority
 
 Clamp v1 and the original implementation phases 0–9 are complete. Version
-0.1.4 is the latest published production release. Release 0.2.0 Phases 1–3 are
-repository-complete. Native filesystem, runtime packaging, source-free
+0.1.4 is the latest published production release. Release 0.2.0 Phases 1–4 are
+repository-complete; Phase 5 local authentication is implemented but its native
+real-clone gate remains pending. Native filesystem, runtime packaging, source-free
 bootstrap, isolated Amp Git, local-runner interfaces, ordinary-update behavior,
 and disposable database execution passed on both candidates; no local target is
 accepted or advertised for production yet.
@@ -184,7 +185,7 @@ tests must not convert an Orb observation or mock into native target evidence.
 | L2. Setup is clean, idempotent, and failure-preserving | Phase 4 setup preflight, archive/install/cache helper tests, and tracked-mutation checks | Real-clone setup twice, injected-install failure, and native end-to-end remain release gates. |
 | L3. Repository launcher selects independent pins | Phase 4 hostile-directory launcher test plus fresh-0.2 scaffold inventory | Alternating-repository native end-to-end remains a release gate. |
 | L4. Exact 0.1.4 migration is fail-closed | Phase 4 exact/current/modified/interrupted/foreign-parent migration and rollback tests | Final-artifact Orb bootstrap and reviewed commit/push workflow remain release/operator gates. |
-| L5. Local Amp authentication is narrow | Sanitized Orb/clone observation fixture; hostile-state cases | Phase 5 helper implementation and real local-login/update gate on each target. |
+| L5. Local Amp authentication is narrow | Sanitized Orb/clone observation fixture; Phase 5 local helper, enrollment, and authenticated loopback Git fixture tests | Real local-login/update and disposable private Amp-hosted clone/publish/sync gate on each target. |
 | L6. Local and Orb semantics agree | Existing v1 acceptance remains the required baseline | Phase 6 cross-executor workflow. |
 | L7. Conflict notification remains preservation-gated | Existing v1 preservation/email evidence; Linux and Mac authenticated local-runner thread/owner-email interface feasibility passed without sending email | Preservation ordering, request deduplication, and notification execution remain Phase 6 gates on both targets. |
 | L8. Credentials are operation-scoped | Stable existing missing-credential codes in the contract fixture | Phase 6 credential-removal workflow, including indexed `get`. |
