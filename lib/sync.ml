@@ -539,12 +539,11 @@ let trusted_amp_runtime ?(allow_loopback_amp_url = false) () =
     error Authentication "git_auth_unavailable"
       "Authenticated Git access is unavailable."
   in
-  match Sys.getenv_opt "AMP_BIN_DIR", Sys.getenv_opt "HOME",
-        Sys.getenv_opt "AMP_API_KEY", Sys.getenv_opt "AMP_URL" with
-  | Some bin_dir, Some home, Some api_key, Some amp_url ->
+  match Sys.getenv_opt "AMP_ORB", Sys.getenv_opt "AMP_BIN_DIR",
+        Sys.getenv_opt "HOME", Sys.getenv_opt "AMP_URL" with
+  | Some "1", Some bin_dir, Some home, Some amp_url ->
       (try
-         if api_key = "" || Filename.is_relative bin_dir
-            || Filename.is_relative home
+         if Filename.is_relative bin_dir || Filename.is_relative home
             || bin_dir <> Filename.concat home ".amp/bin"
             || not (String.for_all safe_path_char bin_dir)
             || not (String.for_all safe_path_char home)
@@ -586,7 +585,7 @@ let trusted_amp_runtime ?(allow_loopback_amp_url = false) () =
             || String.contains amp_url '\r' then raise Exit;
          let environment =
            isolated_process_environment ~home ~xdg_config_home
-             [ "AMP_API_KEY=" ^ api_key; "AMP_URL=" ^ amp_url ]
+             [ "AMP_URL=" ^ amp_url ]
          in
          Ok (helper, environment)
        with _ -> unavailable ())

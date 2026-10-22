@@ -3,7 +3,7 @@ Top-level metadata is available without executing product behavior.
   $ unset KB_DATABASE_URL KB_DATABASE_DIRECT_URL OPENROUTER_API_KEY
   $ repo="$PWD/fixture"; mkdir -p "$repo/knowledge"; cp -L ../../clamp.yaml "$repo/"; kb --repo "$repo" todo --quiet
   $ kb --version
-  0.1.4
+  0.1.5
 
 Initialization creates a complete source-free private repository without
 network or production operations.

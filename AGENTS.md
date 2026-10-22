@@ -235,7 +235,8 @@
   not route it to another provider through fallback behavior.
 - Authenticated Amp HTTPS Git fetches must use only the validated Amp runtime
   credential helper, validated derived `$HOME/.config` XDG location, and minimal
-  Amp auth environment. Keep system/global Git configuration disabled, reset
+  Amp auth environment. Require `AMP_ORB=1`, pass only validated `AMP_URL`, and
+  do not forward ambient keys or identity tokens. Keep system/global Git configuration disabled, reset
   credential helpers explicitly, reject local
   credential/proxy/rewrite configuration before exposing Amp auth, and never
   put `AMP_API_KEY` in argv, output, persisted files, or artifacts.

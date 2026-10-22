@@ -313,7 +313,7 @@ let documentation_and_cli_contract_drift () =
     [ "reviewed Phase 7 CLI compatibility check, final";
       "external compatibility, clean-room";
       "leaves it pending"; "external gates remain" ];
-  check_contains "README records current release" readme "v0.1.3";
+  check_contains "README records current release" readme "v0.1.5";
   check_contains "operations guide marks production operator-controlled"
     (read (path "docs/operations.md")) "no production authority";
   check_absent "PLAN has no pending matrix disposition" plan "**Pending:**"

@@ -131,7 +131,7 @@ let fetch ~maximum_bytes url =
         Curl.set_timeoutms handle 30000;
         Curl.set_sslverifypeer handle true;
         Curl.set_sslverifyhost handle Curl.SSLVERIFYHOST_HOSTNAME;
-        Curl.set_useragent handle "clamp/0.1.4";
+        Curl.set_useragent handle "clamp/0.1.5";
         Curl.set_httpheader handle
           [ "Accept: application/vnd.github+json";
             "X-GitHub-Api-Version: 2022-11-28" ];

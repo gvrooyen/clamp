@@ -76,7 +76,7 @@ literal `@` character.
 `kb init` requires a target path that does not exist. Do not run it over a
 clone or any repository with files or history.
 
-The unreleased v0.1.4 source simplifies this step to:
+Release v0.1.5 supports the verified release shortcut:
 
 ```bash
 kb init \
@@ -87,9 +87,8 @@ kb init \
 ```
 
 The shortcut downloads and verifies the latest stable public package, derives
-the exact runtime pin, and uses the selected package's templates. The published
-v0.1.3 binary predates it, so use the explicit v0.1.3 invocation below until
-v0.1.4 is released.
+the exact runtime pin, and uses the selected package's templates. For an older
+v0.1.3 binary, use the explicit pin form below instead.
 
 ```bash
 source_repository="ampcode.com/OWNER/private-clamp"

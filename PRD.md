@@ -2,8 +2,8 @@
 
 ## Status
 
-Clamp v1 and Phases 0–9 are implemented. Version 0.1.3 is the latest published
-production release; current source targets 0.1.4. The blocking product and
+Clamp v1 and Phases 0–9 are implemented. Version 0.1.5 is the Linux hotfix
+release based on v0.1.4; v0.2 development continues separately. The blocking product and
 architecture decisions are resolved; retrieval coefficients remain tunable
 operational defaults rather than product invariants. Repository-owned
 acceptance is local-only; production deployment and release-tag publication
@@ -944,9 +944,10 @@ atomically creates the stats row if needed, increments `access_count`, and sets
   services process that content; this is an accepted v1 data-flow requirement.
 - Database URLs and API keys live only in Amp project secrets. They must not be
   committed, included in generated files, printed in logs, or placed in email.
-- `AMP_API_KEY` and `AMP_URL` are Amp runtime authentication inputs, not Clamp
-  configuration. Clamp passes them only to a sanitized Git fetch whose sole
-  configured credential helper is the validated Amp runtime executable.
+- `AMP_ORB=1` selects Amp Orb authentication. Clamp validates the Amp runtime,
+  then passes only the validated `AMP_URL` to a sanitized Git child whose sole
+  credential helper is the validated Amp runtime executable. Neither
+  `AMP_API_KEY` nor ambient identity tokens are required or forwarded.
 - All Neon connections require TLS.
 - Error output may include concept IDs and paths but must redact credentials and
   avoid including knowledge bodies in conflict emails.

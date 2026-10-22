@@ -2,7 +2,13 @@
 
 ## Packaged runtime
 
-The current production release is
+The [v0.1.5 Linux hotfix](https://github.com/gvrooyen/clamp/releases/tag/v0.1.5)
+is based on v0.1.4 and restores Amp Orb Git authentication without an
+`AMP_API_KEY` environment variable. Verify its adjacent checksum before
+installation. The separate `main` branch contains unreleased v0.2 development;
+no v0.2 runtime is included in this hotfix.
+
+The historical v0.1.3 release is
 [v0.1.3](https://github.com/gvrooyen/clamp/releases/tag/v0.1.3). Its archive is
 named `clamp-0.1.3-linux-x86_64.tar.gz` and has SHA-256:
 
@@ -99,6 +105,17 @@ checks that:
 
 Only after those checks does it create the corresponding GitHub release and
 upload the archive and checksum. Never force-push a release tag or branch.
+
+Exception for the v0.1.5 Linux hotfix: v0.1.4 was the last released runtime,
+but `main` contains unfinished v0.2 work. Build v0.1.5 from a separate branch
+based directly on the v0.1.4 tag, containing only this authentication fix and
+the version, test, and documentation updates. Before publishing, verify the
+clean tagged tree and remote hotfix branch identify the same commit, that its
+parent is the v0.1.4 release, that the archive's `REVISION` and `VERSION`
+match, and that its adjacent checksum verifies. `release/publish` deliberately
+requires remote `main` and must not be weakened for this exception; publish
+the checked Linux archive and checksum from the hotfix tag explicitly. Do not
+mark unreleased v0.2 as v0.1.5 or change `main` to the old runtime tree.
 
 The current release scripts are Linux x86-64-specific. See
 [Building Clamp](./building.md) before adding another operating system or

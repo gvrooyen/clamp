@@ -122,6 +122,8 @@ let with_environment label initial operation =
   command "git" [ "init"; "--quiet"; "--initial-branch=main"; author ];
   git author [ "config"; "user.name"; "Clamp Test" ];
   git author [ "config"; "user.email"; "clamp-test@local.invalid" ];
+  git author [ "config"; "core.hooksPath"; "/dev/null" ];
+  git author [ "config"; "commit.gpgsign"; "false" ];
   git author [ "remote"; "add"; "origin"; bare ];
   let config =
     read (Filename.concat source_root "clamp.yaml")
@@ -1219,17 +1221,20 @@ let amp_authenticated_git () =
       command "git" [ "init"; "--quiet"; "--initial-branch=main"; source ];
       git source [ "config"; "user.name"; "Clamp Test" ];
       git source [ "config"; "user.email"; "clamp-test@local.invalid" ];
+      git source [ "config"; "core.hooksPath"; "/dev/null" ];
+      git source [ "config"; "commit.gpgsign"; "false" ];
       write (Filename.concat source "README") "authenticated fixture\n";
       git source [ "add"; "README" ];
       git source [ "commit"; "--quiet"; "-m"; "fixture" ];
       command "git" [ "clone"; "--quiet"; "--bare"; source; bare ];
       command "git" [ "clone"; "--quiet"; bare; clone ];
       let helper = Filename.concat bin "amp" in
+      let secret = Printf.sprintf "fixture-%d-%d" (Unix.getpid ()) !counter in
       let write_helper mode =
         write helper
-          ("#!/usr/bin/python3\nimport os,pathlib,sys,time\nxdg=os.environ.get('XDG_CONFIG_HOME')\nexpected=os.path.join(os.environ['HOME'],'.config')\nif xdg != expected: sys.exit(3)\nconfig=pathlib.Path(xdg); config.mkdir(parents=True,exist_ok=True)\nprobe=config/'.clamp-write-probe'; probe.write_text('ok'); probe.unlink()\nmarker=pathlib.Path('" ^
+          ("#!/usr/bin/python3\nimport os,pathlib,sys,time\nxdg=os.environ.get('XDG_CONFIG_HOME')\nexpected=os.path.join(os.environ['HOME'],'.config')\nif xdg != expected or 'AMP_API_KEY' in os.environ or 'AMP_WORKLOAD_IDENTITY_REQUEST_TOKEN' in os.environ: sys.exit(3)\nconfig=pathlib.Path(xdg); config.mkdir(parents=True,exist_ok=True)\nprobe=config/'.clamp-write-probe'; probe.write_text('ok'); probe.unlink()\nmarker=pathlib.Path('" ^
            helper_marker ^ "')\nmode='" ^ mode ^
-           "'\nmarker.write_text(str(os.getpid()))\nif mode == 'hang': time.sleep(60)\nif mode == 'error': sys.exit(1)\nif mode == 'output': sys.stderr.write('x' * 1048576); sys.stderr.flush(); time.sleep(60)\nif os.environ.get('POISON_AUTH') is not None: sys.exit(2)\nif sys.argv[1:] == ['git-credential-helper','get']:\n sys.stdin.read(); print('username=amp'); print('password='+os.environ['AMP_API_KEY']); print()\n");
+           "'\nmarker.write_text(str(os.getpid()))\nif mode == 'hang': time.sleep(60)\nif mode == 'error': sys.exit(1)\nif mode == 'output': sys.stderr.write('x' * 1048576); sys.stderr.flush(); time.sleep(60)\nif os.environ.get('POISON_AUTH') is not None: sys.exit(2)\nif sys.argv[1:] == ['git-credential-helper','get']:\n sys.stdin.read(); print('username=amp'); print('password='+('wrong' if mode == 'wrong-credential' else '" ^ secret ^ "')); print()\n");
         Unix.chmod helper 0o755
       in
       write_helper "ok";
@@ -1244,7 +1249,6 @@ let amp_authenticated_git () =
           "-keyout"; private_key; "-out"; certificate ];
       write server_script
         "import base64,http.server,os,pathlib,ssl,subprocess,sys,urllib.parse\nroot,portfile,secret,cert,key=sys.argv[1:6]\nexpected='Basic '+base64.b64encode(('amp:'+secret).encode()).decode()\nclass H(http.server.BaseHTTPRequestHandler):\n def log_message(self,*args): pass\n def handle_git(self):\n  if self.headers.get('Authorization') != expected:\n   self.send_response(401); self.send_header('WWW-Authenticate','Basic realm=fixture'); self.send_header('Content-Length','0'); self.end_headers(); return\n  parsed=urllib.parse.urlsplit(self.path); length=int(self.headers.get('Content-Length','0')); body=self.rfile.read(length)\n  env={'PATH':'/usr/bin:/bin','GIT_PROJECT_ROOT':root,'GIT_HTTP_EXPORT_ALL':'1','PATH_INFO':parsed.path,'QUERY_STRING':parsed.query,'REQUEST_METHOD':self.command,'CONTENT_TYPE':self.headers.get('Content-Type',''),'CONTENT_LENGTH':str(length),'REMOTE_USER':'amp'}\n  result=subprocess.run(['/usr/bin/git','http-backend'],input=body,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env=env,check=True)\n  head,payload=result.stdout.split(b'\\r\\n\\r\\n',1); lines=head.decode().split('\\r\\n'); status=200\n  if lines and lines[0].startswith('Status:'): status=int(lines.pop(0).split()[1])\n  self.send_response(status)\n  for line in lines:\n   if line: self.send_header(*line.split(': ',1))\n  self.send_header('Content-Length',str(len(payload))); self.end_headers(); self.wfile.write(payload)\n def do_GET(self): self.handle_git()\n def do_POST(self): self.handle_git()\nserver=http.server.HTTPServer(('127.0.0.1',0),H); context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); context.load_cert_chain(cert,key); server.socket=context.wrap_socket(server.socket,server_side=True); pathlib.Path(portfile).write_text(str(server.server_port)); server.serve_forever()\n";
-      let secret = Printf.sprintf "fixture-%d-%d" (Unix.getpid ()) !counter in
       let dev_null = Unix.openfile "/dev/null" [ Unix.O_RDWR; Unix.O_CLOEXEC ] 0 in
       let server_arguments =
         [| "/usr/bin/python3"; server_script; root; port_file; secret;
@@ -1271,8 +1275,9 @@ let amp_authenticated_git () =
             [ "-c"; "http.sslCAInfo=" ^ certificate ] @ arguments remote
           in
           let variables ?(key = Some secret) () =
-            [ ("AMP_BIN_DIR", Some bin); ("HOME", Some home);
+            [ ("AMP_ORB", Some "1"); ("AMP_BIN_DIR", Some bin); ("HOME", Some home);
               ("AMP_API_KEY", key); ("AMP_URL", Some ("https://127.0.0.1:" ^ port));
+              ("AMP_WORKLOAD_IDENTITY_REQUEST_TOKEN", Some "untrusted-token");
               ("POISON_AUTH", None) ]
           in
           Alcotest.(check bool) "exact Amp remote" true
@@ -1285,7 +1290,7 @@ let amp_authenticated_git () =
             (Clamp.Sync.For_test.amp_remote "ampcode.com/@example/clamp"
                "https://ampcode.com.example/@example/clamp");
           with_variables
-            [ ("AMP_BIN_DIR", Some bin); ("HOME", Some home);
+            [ ("AMP_ORB", Some "1"); ("AMP_BIN_DIR", Some bin); ("HOME", Some home);
               ("AMP_API_KEY", Some secret);
               ("AMP_URL", Some "https://attacker.invalid") ]
             (fun () ->
@@ -1355,11 +1360,19 @@ let amp_authenticated_git () =
             (Sys.file_exists hostile_marker);
           git clone [ "config"; "--unset-all"; "credential.helper" ];
           with_variables (variables ~key:None ()) (fun () ->
-            check_error "missing Amp auth" "git_auth_unavailable"
-              (Clamp.Sync.For_test.amp_git ~repo:clone ~remote
-                 ~arguments:(tls_arguments (fun remote -> [ "ls-remote"; remote ]))
-                 ~maximum:4096 ~timeout:1.));
-          with_variables (variables ~key:(Some (secret ^ "-invalid")) ()) (fun () ->
+            let output = check_ok "key-free authenticated Git"
+                (Clamp.Sync.For_test.amp_git ~repo:clone ~remote
+                   ~arguments:(tls_arguments (fun remote -> [ "ls-remote"; "--heads"; remote ]))
+                   ~maximum:4096 ~timeout:3.) in
+            Alcotest.(check bool) "key-free main ref" true
+              (String.ends_with ~suffix:"refs/heads/main\n" output));
+          with_variables
+            (("AMP_ORB", None) :: List.remove_assoc "AMP_ORB" (variables ~key:None ()))
+            (fun () ->
+              check_error "outside Orb rejected" "git_auth_unavailable"
+                (Clamp.Sync.For_test.trusted_amp_runtime ()));
+          write_helper "wrong-credential";
+          with_variables (variables ~key:None ()) (fun () ->
             match Clamp.Sync.For_test.amp_git ~repo:clone ~remote
                     ~arguments:(tls_arguments (fun remote -> [ "ls-remote"; remote ]))
                     ~maximum:4096 ~timeout:2. with
@@ -1370,6 +1383,7 @@ let amp_authenticated_git () =
                   (try ignore (Str.search_forward (Str.regexp_string secret)
                                  failure.message 0); true with Not_found -> false)
             | Ok _ -> Alcotest.fail "invalid Amp auth succeeded");
+          write_helper "ok";
           List.iter (fun (mode, code, maximum) ->
               Sys.remove helper_marker;
               write_helper mode;
@@ -1377,7 +1391,7 @@ let amp_authenticated_git () =
                 check_error ("helper " ^ mode) code
                   (Clamp.Sync.For_test.amp_git ~repo:clone ~remote
                      ~arguments:(tls_arguments (fun remote -> [ "ls-remote"; remote ]))
-                     ~maximum ~timeout:0.2));
+                     ~maximum ~timeout:1.));
               let helper_pid = int_of_string (String.trim (read helper_marker)) in
               Alcotest.(check bool) (mode ^ " helper reaped") true
                 (await_process_exit helper_pid))
@@ -1398,7 +1412,7 @@ let amp_authenticated_git () =
                       "https://ampcode.com/@example/clamp" ];
       let before = database_snapshot env.connection and calls = ref 0 in
       with_variables
-        [ ("AMP_BIN_DIR", Some bin); ("HOME", Some home); ("AMP_API_KEY", None);
+        [ ("AMP_ORB", Some "1"); ("AMP_BIN_DIR", Some bin); ("HOME", Some home); ("AMP_API_KEY", None);
           ("AMP_URL", Some "http://127.0.0.1:1") ]
         (fun () ->
           check_error "missing auth sync" "git_auth_unavailable" (run env calls));
@@ -1407,7 +1421,7 @@ let amp_authenticated_git () =
         (database_snapshot env.connection);
       Unix.chmod helper 0o777;
       with_variables
-        [ ("AMP_BIN_DIR", Some bin); ("HOME", Some home);
+        [ ("AMP_ORB", Some "1"); ("AMP_BIN_DIR", Some bin); ("HOME", Some home);
           ("AMP_API_KEY", Some "synthetic-invalid-helper-key");
           ("AMP_URL", Some "https://ampcode.com") ]
         (fun () ->
