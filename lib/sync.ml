@@ -602,11 +602,10 @@ let trusted_orb_amp_runtime ?(allow_loopback_amp_url = false) () =
     unavailable_git_auth ()
   in
   match Sys.getenv_opt "AMP_BIN_DIR", Sys.getenv_opt "HOME",
-        Sys.getenv_opt "AMP_API_KEY", Sys.getenv_opt "AMP_URL" with
-  | Some bin_dir, Some home, Some api_key, Some amp_url ->
+        Sys.getenv_opt "AMP_URL" with
+  | Some bin_dir, Some home, Some amp_url ->
       (try
-         if api_key = "" || Filename.is_relative bin_dir
-            || Filename.is_relative home
+         if Filename.is_relative bin_dir || Filename.is_relative home
             || bin_dir <> Filename.concat home ".amp/bin"
             || not (String.for_all safe_path_char bin_dir)
             || not (String.for_all safe_path_char home)
@@ -642,7 +641,7 @@ let trusted_orb_amp_runtime ?(allow_loopback_amp_url = false) () =
             || String.contains amp_url '\r' then raise Exit;
          let environment =
            isolated_process_environment ~home ~xdg_config_home
-             [ "AMP_API_KEY=" ^ api_key; "AMP_URL=" ^ amp_url ]
+             [ "AMP_URL=" ^ amp_url ]
          in
          Ok (helper, environment)
        with _ -> unavailable ())
@@ -1020,12 +1019,14 @@ let trusted_local_amp_runtime source =
        | Exit | Unix.Unix_error _ -> local_amp_unsafe "identity" "amp_executable")
 
 let trusted_amp_runtime ?source ?(allow_loopback_amp_url = false) () =
-  match Sys.getenv_opt "AMP_BIN_DIR", Sys.getenv_opt "AMP_API_KEY",
-        Sys.getenv_opt "AMP_URL" with
-  | Some _, Some _, Some _ ->
+  match Sys.getenv_opt "AMP_ORB" with
+  | Some "1" ->
       trusted_orb_amp_runtime ~allow_loopback_amp_url ()
-  | None, None, None -> trusted_local_amp_runtime source
-  | _ -> unavailable_git_auth ()
+  | None ->
+      (match Sys.getenv_opt "AMP_BIN_DIR", Sys.getenv_opt "AMP_URL" with
+      | None, None -> trusted_local_amp_runtime source
+      | _ -> unavailable_git_auth ())
+  | Some _ -> unavailable_git_auth ()
 
 let shell_quote value =
   "'" ^ String.concat "'\\''" (String.split_on_char '\'' value) ^ "'"
@@ -1220,9 +1221,7 @@ let credential_helper ~source ~pinned ~operation =
           "local_amp_helper_protocol_invalid" 1
 
 let local_authentication_context () =
-  Sys.getenv_opt "AMP_BIN_DIR" = None
-  && Sys.getenv_opt "AMP_API_KEY" = None
-  && Sys.getenv_opt "AMP_URL" = None
+  Sys.getenv_opt "AMP_ORB" = None
 
 let local_git_error timeout (failure : error) =
   match failure.code with

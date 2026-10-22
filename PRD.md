@@ -1047,12 +1047,12 @@ The sync algorithm:
    before exec until the parent has confirmed and anchored that process group.
    For an exact Amp HTTPS origin, use the Amp runtime's validated credential
    helper with a writable validated home, a validated `XDG_CONFIG_HOME` derived
-   as `$HOME/.config`, and only the Amp API key and Amp URL required by that
-   helper. Explicitly clear inherited/configured credential
+   as `$HOME/.config`, and the validated `AMP_URL` but no account API key or
+   inherited Orb identity token. Explicitly clear inherited/configured credential
    helpers and askpass behavior, keep global/system configuration disabled, and
    reject repository-local credential, HTTP proxy/header, URL rewrite/include,
-   hooks-path, or upload-pack overrides before placing Amp auth in the Git
-   process environment. Never place the key in argv or surfaced output. Local
+   hooks-path, or upload-pack overrides before exposing the Amp helper to Git.
+   Never place credentials in argv or surfaced output. Local
    and `file://` remotes remain unauthenticated and receive no Amp auth.
    Clamp v1 requires the repository-reported object format to be SHA-1 and
    returns `git_object_format_unsupported` before fetch for another format.
@@ -1326,9 +1326,14 @@ atomically creates the stats row if needed, increments `access_count`, and sets
   services process that content; this is an accepted v1 data-flow requirement.
 - Database URLs and API keys live only in Amp project secrets. They must not be
   committed, included in generated files, printed in logs, or placed in email.
-- `AMP_API_KEY` and `AMP_URL` are Amp runtime authentication inputs, not Clamp
-  configuration. Clamp passes them only to a sanitized Git fetch whose sole
-  configured credential helper is the validated Amp runtime executable.
+- In an Orb (`AMP_ORB=1`), `AMP_URL` selects the validated Amp service and the
+  validated Amp runtime executable supplies Git credentials through its
+  helper. Clamp does not require, forward, or inspect `AMP_API_KEY` or an Orb
+  identity token. Outside an Orb, local Amp enrollment supplies the trusted
+  helper; a caller-set `AMP_API_KEY` is ignored on both paths. Any other
+  `AMP_ORB` value, or `AMP_BIN_DIR`/`AMP_URL` without `AMP_ORB=1`, returns
+  `git_auth_unavailable`. Both paths isolate Git configuration and restrict
+  authentication to the exact Amp HTTPS origin.
 - All Neon connections require TLS.
 - Error output may include concept IDs and paths but must redact credentials and
   avoid including knowledge bodies in conflict emails.

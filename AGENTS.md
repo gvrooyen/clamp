@@ -237,8 +237,9 @@
   credential helper, validated derived `$HOME/.config` XDG location, and minimal
   Amp auth environment. Keep system/global Git configuration disabled, reset
   credential helpers explicitly, reject local
-  credential/proxy/rewrite configuration before exposing Amp auth, and never
-  put `AMP_API_KEY` in argv, output, persisted files, or artifacts.
+  credential/proxy/rewrite configuration before exposing the Amp helper. Never
+  require or forward `AMP_API_KEY` or an Orb identity token to Git; never put
+  credentials in argv, output, persisted files, or artifacts.
 - Keep production and test databases separate. Destructive tests against the
   production Neon branch are forbidden.
 

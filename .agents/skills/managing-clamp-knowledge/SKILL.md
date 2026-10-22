@@ -32,8 +32,9 @@ Markdown is the non-semantic fallback.
    ```
 
    Do not request or use an OpenAI key, OpenRouter BYOK key, Neon account key,
-   or stored recipient address. `AMP_API_KEY` is Amp runtime Git authentication,
-   not Clamp configuration; never inspect or print it.
+   or stored recipient address. Orb Git authentication uses Amp's validated
+   credential helper, not an `AMP_API_KEY` environment variable; never inspect
+   or print the helper's credentials.
 5. Obtain the exact current thread ID and direct thread URL from Amp's
    authenticated current-thread context. Do not read them from environment
    variables, files, branch names, prompts, or user-controlled command output.

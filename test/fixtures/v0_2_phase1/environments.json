@@ -6,7 +6,7 @@
       "state": "implemented",
       "executor": "orb",
       "amp_path_shape": "$HOME/.amp/bin/amp",
-      "credential_inputs": ["AMP_BIN_DIR", "AMP_API_KEY", "AMP_URL", "HOME"],
+      "credential_inputs": ["AMP_ORB", "AMP_BIN_DIR", "AMP_URL", "HOME"],
       "persisted_secret": false
     },
     {

@@ -659,6 +659,10 @@ let target_and_environment_fixtures () =
   Alcotest.(check (list string)) "auth fixtures"
     [ "orb_v1"; "local_linux_direct_install"; "local_macos_arm64" ]
     (List.map (string "name") auth);
+  let orb_auth = List.find (fun value -> string "name" value = "orb_v1") auth in
+  Alcotest.(check (list string)) "Orb credential inputs"
+    [ "AMP_ORB"; "AMP_BIN_DIR"; "AMP_URL"; "HOME" ]
+    (member "credential_inputs" orb_auth |> strings);
   List.iter
     (fun value ->
       Alcotest.(check bool) (string "name" value ^ " stores no secret") false

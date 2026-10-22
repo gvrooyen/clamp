@@ -12,6 +12,11 @@ done.
 > Current release: [v0.1.4](https://github.com/gvrooyen/clamp/releases/tag/v0.1.4).
 > Requires x86_64 Linux with glibc 2.36 or newer.
 
+Amp no longer exposes `AMP_API_KEY` in Orbs, so v0.1.4's authenticated
+`kb sync` and `kb publish` preflight currently returns `git_auth_unavailable`.
+The source change to use Amp's Git credential helper without that key is
+not yet in a published runtime.
+
 Release 0.2.0 Phase 4 is repository-complete: its portable launcher, local
 runtime installer, exact-0.1.4 scaffold migration, Linux checks, native macOS
 checks, and Oracle review passed. Phase 5 local Amp authentication is implemented

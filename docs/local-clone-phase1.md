@@ -99,9 +99,11 @@ Native Apple-silicon observations from runner `clamp-macos`:
 | Disposable database | PostgreSQL 15.19 and pinned pgvector 0.8.1 built as arm64, ran on a private Unix socket with TCP disabled, applied both migrations, and passed vector/HNSW checks | Native database integration is feasible without an ambient production URL. |
 | Existing Clamp source | Current filesystem C stubs, linker/RPATH, release builder, and setup paths are Linux-specific | Porting belongs to the later native-runtime phase; Phase 1 must not claim a Mac runtime exists. |
 
-The Orb exposes `AMP_BIN_DIR`, `AMP_API_KEY`, and `AMP_URL`. That is the v1 Orb
-authentication path and is specifically excluded as evidence for a local login
-or local helper environment.
+At the Phase 1 observation, the Orb exposed `AMP_BIN_DIR`, `AMP_API_KEY`, and
+`AMP_URL`. Amp has since stopped exposing the account key in Orbs; the source
+now selects Orb authentication with `AMP_ORB=1` and invokes the validated helper
+without forwarding a credential. The historical Orb observation is not evidence
+for a local login or local helper environment.
 
 ## Phase 1 feasibility resolution
 

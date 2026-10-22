@@ -76,10 +76,12 @@ filesystem checks.
 - Generated `.agents/setup` and `.agents/resume` assume Debian, `sudo`, the
   PostgreSQL 15 `main` cluster, Orb filesystem paths, and Linux x86-64 release
   assets. They are not safe general-purpose local installers.
-- `kb sync` and `kb publish` accept only an exact Amp origin and an Orb-specific
-  trusted Amp runtime consisting of `AMP_BIN_DIR`, `AMP_API_KEY`, `AMP_URL`, and
-  `$HOME/.amp/bin/amp`. The credential helper configured by `amp clone` is not
-  currently a supported `kb` authentication source.
+- The original 0.1.4 `kb sync` and `kb publish` accepted only an exact Amp
+  origin and an Orb-specific trusted runtime requiring `AMP_API_KEY` as well as
+  `AMP_BIN_DIR`, `AMP_URL`, and `$HOME/.amp/bin/amp`. Amp no longer supplies that
+  account key to Orbs; the current source selects the Orb path with `AMP_ORB=1`
+  and uses the validated CLI's Git credential helper instead. A local
+  `amp clone` helper alone remains insufficient without Clamp enrollment.
 - The `kb` filesystem stubs, linker configuration, executable discovery,
   upgrader, packaging, and some tests are Linux-specific. A shell-only change
   cannot provide safe macOS mutation or publication.
@@ -448,7 +450,8 @@ clone/publish/exact-tip-sync on each target remain exit gates. Phase 6 and the
 
 ### Design
 
-Keep the current Orb credential path unchanged. Add a separate local path that
+Keep the Orb's validated helper boundary while adapting to Amp's removal of
+`AMP_API_KEY` from Orb environments. Add a separate local path that
 uses the authenticated Amp CLI installed on the user's machine, not arbitrary
 Git credential configuration. Phase 1 determines whether separate non-secret
 enrollment metadata is necessary; prefer invocation-time validation of a stable
